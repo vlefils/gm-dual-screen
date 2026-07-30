@@ -762,6 +762,10 @@ input[type="range"] {
   cursor: grabbing;
 }
 
+.map-tool-pan[data-zone-hovered="true"] canvas {
+  cursor: pointer;
+}
+
 .map-tool-erase canvas {
   cursor: crosshair;
 }

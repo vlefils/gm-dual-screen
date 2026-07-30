@@ -64,6 +64,12 @@ export type SnapResult = {
   zoneId: string | null;
 };
 
+export type BoundaryMergeResult = {
+  points: Point[];
+  zones: RevealZone[];
+  mergedZoneIds: string[];
+};
+
 export function createId(prefix: string): string {
   const random =
     typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -120,6 +126,85 @@ export function isUsableRect(points: Point[]): boolean {
   );
 }
 
+export function isPointInZone(
+  point: Point,
+  zone: RevealZone,
+  boundaryTolerance = 0.000001,
+): boolean {
+  if (zone.points.length < 2) return false;
+  if (zone.kind === "rect") {
+    const [start, end] = zone.points;
+    return (
+      point.x >= Math.min(start.x, end.x) - boundaryTolerance &&
+      point.x <= Math.max(start.x, end.x) + boundaryTolerance &&
+      point.y >= Math.min(start.y, end.y) - boundaryTolerance &&
+      point.y <= Math.max(start.y, end.y) + boundaryTolerance
+    );
+  }
+  if (zone.points.length < 3) return false;
+
+  for (let index = 0; index < zone.points.length; index += 1) {
+    const boundaryPoint = closestPointOnSegment(
+      point,
+      zone.points[index],
+      zone.points[(index + 1) % zone.points.length],
+      1,
+      1,
+    );
+    if (boundaryPoint.distance <= boundaryTolerance) return true;
+  }
+
+  let inside = false;
+  for (
+    let currentIndex = 0, previousIndex = zone.points.length - 1;
+    currentIndex < zone.points.length;
+    previousIndex = currentIndex, currentIndex += 1
+  ) {
+    const current = zone.points[currentIndex];
+    const previous = zone.points[previousIndex];
+    const crossesHorizontalRay =
+      current.y > point.y !== previous.y > point.y &&
+      point.x <
+        ((previous.x - current.x) * (point.y - current.y)) /
+          (previous.y - current.y) +
+          current.x;
+    if (crossesHorizontalRay) inside = !inside;
+  }
+  return inside;
+}
+
+function zoneArea(zone: RevealZone): number {
+  if (zone.kind === "rect" && zone.points.length >= 2) {
+    return (
+      Math.abs(zone.points[1].x - zone.points[0].x) *
+      Math.abs(zone.points[1].y - zone.points[0].y)
+    );
+  }
+  if (zone.points.length < 3) return Number.POSITIVE_INFINITY;
+  let doubleArea = 0;
+  for (let index = 0; index < zone.points.length; index += 1) {
+    const current = zone.points[index];
+    const next = zone.points[(index + 1) % zone.points.length];
+    doubleArea += current.x * next.y - next.x * current.y;
+  }
+  return Math.abs(doubleArea) / 2;
+}
+
+export function findZoneAtPoint(
+  point: Point,
+  zones: RevealZone[],
+): RevealZone | null {
+  let best: { zone: RevealZone; area: number } | null = null;
+  for (const zone of zones) {
+    if (!isPointInZone(point, zone)) continue;
+    const area = zoneArea(zone);
+    if (!best || area <= best.area) {
+      best = { zone, area };
+    }
+  }
+  return best?.zone ?? null;
+}
+
 export function movePolygonVertex(
   zone: RevealZone,
   vertexIndex: number,
@@ -159,7 +244,7 @@ function closestPointOnSegment(
   end: Point,
   scaleX: number,
   scaleY: number,
-): { point: Point; distance: number } {
+): { point: Point; distance: number; progress: number } {
   const segmentX = (end.x - start.x) * scaleX;
   const segmentY = (end.y - start.y) * scaleY;
   const pointX = (point.x - start.x) * scaleX;
@@ -183,6 +268,7 @@ function closestPointOnSegment(
       (candidate.x - point.x) * scaleX,
       (candidate.y - point.y) * scaleY,
     ),
+    progress,
   };
 }
 
@@ -227,6 +313,312 @@ export function snapPointToZoneBoundaries(
     point: normalizePoint(point),
     snapped: false,
     zoneId: null,
+  };
+}
+
+type BoundaryLocation = {
+  point: Point;
+  segmentIndex: number;
+  progress: number;
+};
+
+function pointsAreEqual(first: Point, second: Point, tolerance: number): boolean {
+  return Math.hypot(first.x - second.x, first.y - second.y) <= tolerance;
+}
+
+function locatePointOnBoundary(
+  point: Point,
+  boundary: Point[],
+  tolerance: number,
+): BoundaryLocation | null {
+  let best:
+    | (BoundaryLocation & {
+        distance: number;
+      })
+    | null = null;
+
+  for (let index = 0; index < boundary.length; index += 1) {
+    const candidate = closestPointOnSegment(
+      point,
+      boundary[index],
+      boundary[(index + 1) % boundary.length],
+      1,
+      1,
+    );
+    if (!best || candidate.distance < best.distance) {
+      best = {
+        point: candidate.point,
+        segmentIndex: index,
+        progress: candidate.progress,
+        distance: candidate.distance,
+      };
+    }
+  }
+
+  if (!best || best.distance > tolerance) return null;
+  return {
+    point: best.point,
+    segmentIndex: best.segmentIndex,
+    progress: best.progress,
+  };
+}
+
+function appendDistinctPoint(
+  points: Point[],
+  point: Point,
+  tolerance: number,
+): void {
+  const previous = points[points.length - 1];
+  if (!previous || !pointsAreEqual(previous, point, tolerance)) {
+    points.push(normalizePoint(point));
+  }
+}
+
+function forwardBoundaryPath(
+  boundary: Point[],
+  start: BoundaryLocation,
+  end: BoundaryLocation,
+  tolerance: number,
+): Point[] {
+  const path: Point[] = [start.point];
+  const startPosition = start.segmentIndex + start.progress;
+  let endPosition = end.segmentIndex + end.progress;
+  while (endPosition <= startPosition + tolerance) {
+    endPosition += boundary.length;
+  }
+
+  for (
+    let vertexPosition = Math.floor(startPosition) + 1;
+    vertexPosition < endPosition - tolerance;
+    vertexPosition += 1
+  ) {
+    appendDistinctPoint(
+      path,
+      boundary[vertexPosition % boundary.length],
+      tolerance,
+    );
+  }
+  appendDistinctPoint(path, end.point, tolerance);
+  return path;
+}
+
+function pathLength(points: Point[]): number {
+  let length = 0;
+  for (let index = 1; index < points.length; index += 1) {
+    length += Math.hypot(
+      points[index].x - points[index - 1].x,
+      points[index].y - points[index - 1].y,
+    );
+  }
+  return length;
+}
+
+function sharedBoundaryPath(
+  start: Point,
+  end: Point,
+  zone: RevealZone,
+  tolerance: number,
+  maxDetourRatio: number,
+): Point[] | null {
+  if (zone.kind !== "polygon" || zone.points.length < 3) return null;
+  const startLocation = locatePointOnBoundary(start, zone.points, tolerance);
+  const endLocation = locatePointOnBoundary(end, zone.points, tolerance);
+  if (!startLocation || !endLocation) return null;
+
+  const directLength = Math.hypot(end.x - start.x, end.y - start.y);
+  if (directLength <= tolerance) return null;
+
+  const forward = forwardBoundaryPath(
+    zone.points,
+    startLocation,
+    endLocation,
+    tolerance,
+  );
+  const backward = forwardBoundaryPath(
+    zone.points,
+    endLocation,
+    startLocation,
+    tolerance,
+  ).reverse();
+  const best =
+    pathLength(forward) <= pathLength(backward) ? forward : backward;
+
+  if (pathLength(best) > directLength * maxDetourRatio + tolerance) {
+    return null;
+  }
+  return [start, ...best.slice(1, -1), end];
+}
+
+function bestSharedBoundaryMatch(
+  start: Point,
+  end: Point,
+  zones: RevealZone[],
+  tolerance: number,
+  maxDetourRatio: number,
+): { zone: RevealZone; path: Point[] } | null {
+  let bestMatch:
+    | { zone: RevealZone; path: Point[]; length: number }
+    | null = null;
+
+  for (const zone of zones) {
+    const path = sharedBoundaryPath(
+      start,
+      end,
+      zone,
+      tolerance,
+      maxDetourRatio,
+    );
+    if (!path) continue;
+    const length = pathLength(path);
+    if (!bestMatch || length < bestMatch.length) {
+      bestMatch = { zone, path, length };
+    }
+  }
+
+  return bestMatch
+    ? { zone: bestMatch.zone, path: bestMatch.path }
+    : null;
+}
+
+function insertPointsOnBoundary(
+  boundary: Point[],
+  candidates: Point[],
+  tolerance: number,
+): Point[] {
+  const result: Point[] = [];
+
+  for (let index = 0; index < boundary.length; index += 1) {
+    const start = boundary[index];
+    const end = boundary[(index + 1) % boundary.length];
+    appendDistinctPoint(result, start, tolerance);
+
+    const insertions = candidates
+      .map((point) => ({
+        ...closestPointOnSegment(point, start, end, 1, 1),
+        source: point,
+      }))
+      .filter(
+        (candidate) =>
+          candidate.distance <= tolerance &&
+          candidate.progress > tolerance &&
+          candidate.progress < 1 - tolerance,
+      )
+      .sort((first, second) => first.progress - second.progress);
+
+    for (const insertion of insertions) {
+      appendDistinctPoint(result, insertion.source, tolerance);
+    }
+  }
+
+  if (
+    result.length > 1 &&
+    pointsAreEqual(result[0], result[result.length - 1], tolerance)
+  ) {
+    result.pop();
+  }
+  return result;
+}
+
+export function mergePolygonDraftBoundaries(
+  points: Point[],
+  zones: RevealZone[],
+  tolerance = 0.000001,
+  maxDetourRatio = 3,
+): Point[] {
+  if (points.length < 2) return points;
+  const mergedPoints: Point[] = [];
+
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const start = normalizePoint(points[index]);
+    const end = normalizePoint(points[index + 1]);
+    appendDistinctPoint(mergedPoints, start, tolerance);
+    const match = bestSharedBoundaryMatch(
+      start,
+      end,
+      zones,
+      tolerance,
+      maxDetourRatio,
+    );
+    if (!match) continue;
+    for (const point of match.path.slice(1, -1)) {
+      appendDistinctPoint(mergedPoints, point, tolerance);
+    }
+  }
+
+  appendDistinctPoint(
+    mergedPoints,
+    normalizePoint(points[points.length - 1]),
+    tolerance,
+  );
+  return mergedPoints;
+}
+
+/**
+ * Makes a new polygon reuse adjacent polygon edges. Both polygons receive the
+ * same junction vertices, so later rendering and fog reconstruction remain
+ * deterministic at every resolution.
+ */
+export function mergePolygonBoundaries(
+  points: Point[],
+  zones: RevealZone[],
+  tolerance = 0.000001,
+  maxDetourRatio = 3,
+): BoundaryMergeResult {
+  if (points.length < 3) {
+    return { points, zones, mergedZoneIds: [] };
+  }
+
+  const mergedPoints: Point[] = [];
+  const sharedPointsByZone = new Map<string, Point[]>();
+
+  for (let index = 0; index < points.length; index += 1) {
+    const start = normalizePoint(points[index]);
+    const end = normalizePoint(points[(index + 1) % points.length]);
+    appendDistinctPoint(mergedPoints, start, tolerance);
+
+    const bestMatch = bestSharedBoundaryMatch(
+      start,
+      end,
+      zones,
+      tolerance,
+      maxDetourRatio,
+    );
+
+    if (!bestMatch) continue;
+    const shared = sharedPointsByZone.get(bestMatch.zone.id) ?? [];
+    shared.push(...bestMatch.path);
+    sharedPointsByZone.set(bestMatch.zone.id, shared);
+    for (const point of bestMatch.path.slice(1, -1)) {
+      appendDistinctPoint(mergedPoints, point, tolerance);
+    }
+  }
+
+  if (
+    mergedPoints.length > 1 &&
+    pointsAreEqual(
+      mergedPoints[0],
+      mergedPoints[mergedPoints.length - 1],
+      tolerance,
+    )
+  ) {
+    mergedPoints.pop();
+  }
+
+  return {
+    points: mergedPoints,
+    zones: zones.map((zone) => {
+      const sharedPoints = sharedPointsByZone.get(zone.id);
+      if (!sharedPoints || zone.kind !== "polygon") return zone;
+      return {
+        ...zone,
+        points: insertPointsOnBoundary(
+          zone.points,
+          sharedPoints,
+          tolerance,
+        ),
+      };
+    }),
+    mergedZoneIds: [...sharedPointsByZone.keys()],
   };
 }
 

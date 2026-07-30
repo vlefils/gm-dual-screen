@@ -25,7 +25,10 @@ import {
   cloneScene,
   createId,
   createScene,
+  findZoneAtPoint,
   isUsableRect,
+  mergePolygonBoundaries,
+  mergePolygonDraftBoundaries,
   movePolygonVertex,
   snapPointToZoneBoundaries,
   normalizePoint,
@@ -57,6 +60,7 @@ type MapTool = "pan" | "rect" | "polygon" | "vertices" | "erase";
 type Notice = { tone: "success" | "error"; text: string } | null;
 
 const ACTIVE_SCENE_KEY = "activeSceneId";
+const POLYGON_DRAFT_COLOR = "#58d6ff";
 
 function formatError(error: unknown): string {
   if (
@@ -180,6 +184,7 @@ type MapStageProps = {
     point: Point,
   ) => void;
   onStroke?: (stroke: RevealStroke) => void;
+  onToggleZone?: (zoneId: string) => void;
 };
 
 function MapStage({
@@ -196,11 +201,18 @@ function MapStage({
   onCreateZone,
   onMoveZoneVertex,
   onStroke,
+  onToggleZone,
 }: MapStageProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const gestureRef = useRef<
-    | { kind: "pan"; startX: number; startY: number; viewport: MapViewport }
+    | {
+        kind: "pan";
+        startX: number;
+        startY: number;
+        viewport: MapViewport;
+        moved: boolean;
+      }
     | { kind: "rect" }
     | { kind: "erase" }
     | { kind: "vertex"; zoneId: string; vertexIndex: number }
@@ -211,6 +223,15 @@ function MapStage({
   const [draftRect, setDraftRect] = useState<Point[] | null>(null);
   const [draftStroke, setDraftStroke] = useState<Point[]>([]);
   const [snapIndicator, setSnapIndicator] = useState<Point | null>(null);
+  const [hoveredZoneId, setHoveredZoneId] = useState<string | null>(null);
+  const polygonPreview = useMemo(
+    () =>
+      mergePolygonDraftBoundaries(
+        polygonDraft,
+        scene?.zones ?? [],
+      ),
+    [polygonDraft, scene?.zones],
+  );
 
   useEffect(() => {
     if (!mapUrl) {
@@ -308,6 +329,28 @@ function MapStage({
 
     context.drawImage(fog, 0, 0, size.width, size.height);
 
+    if (interactive && mode === "live") {
+      context.save();
+      for (const zone of scene.zones) {
+        const isHovered = zone.id === hoveredZoneId;
+        drawZonePath(context, zone, rect);
+        if (isHovered) {
+          context.fillStyle = "rgba(88, 214, 255, 0.12)";
+          context.fill();
+          drawZonePath(context, zone, rect);
+        }
+        context.lineWidth = isHovered ? 4 : 2;
+        context.strokeStyle = isHovered
+          ? POLYGON_DRAFT_COLOR
+          : zone.revealed
+            ? "#5ad4a4"
+            : "#d7ad64";
+        context.setLineDash(zone.revealed || isHovered ? [] : [7, 5]);
+        context.stroke();
+      }
+      context.restore();
+    }
+
     if (mode === "prepare") {
       context.save();
       context.lineWidth = 2;
@@ -369,21 +412,32 @@ function MapStage({
         context.stroke();
       }
 
-      if (polygonDraft.length) {
+      if (polygonPreview.length) {
         context.beginPath();
-        context.strokeStyle = "#f0c97c";
-        context.fillStyle = "#f0c97c";
+        context.strokeStyle = POLYGON_DRAFT_COLOR;
+        context.lineWidth = 3;
         context.setLineDash([5, 4]);
-        polygonDraft.forEach((point, index) => {
+        polygonPreview.forEach((point, index) => {
           const x = rect.x + point.x * rect.width;
           const y = rect.y + point.y * rect.height;
           if (index === 0) context.moveTo(x, y);
           else context.lineTo(x, y);
-          context.moveTo(x + 3, y);
-          context.arc(x, y, 3, 0, Math.PI * 2);
         });
         context.stroke();
-        context.fill();
+
+        context.setLineDash([]);
+        polygonDraft.forEach((point) => {
+          const x = rect.x + point.x * rect.width;
+          const y = rect.y + point.y * rect.height;
+          context.beginPath();
+          context.fillStyle = "#08141a";
+          context.arc(x, y, 5, 0, Math.PI * 2);
+          context.fill();
+          context.beginPath();
+          context.fillStyle = POLYGON_DRAFT_COLOR;
+          context.arc(x, y, 3, 0, Math.PI * 2);
+          context.fill();
+        });
       }
 
       if (snapIndicator) {
@@ -392,14 +446,19 @@ function MapStage({
         context.setLineDash([]);
         context.beginPath();
         context.arc(x, y, 10, 0, Math.PI * 2);
-        context.fillStyle = "rgba(240, 201, 124, 0.16)";
+        context.fillStyle =
+          tool === "polygon"
+            ? "rgba(88, 214, 255, 0.18)"
+            : "rgba(240, 201, 124, 0.16)";
         context.fill();
         context.lineWidth = 2;
-        context.strokeStyle = "#f8d99d";
+        context.strokeStyle =
+          tool === "polygon" ? POLYGON_DRAFT_COLOR : "#f8d99d";
         context.stroke();
         context.beginPath();
         context.arc(x, y, 3, 0, Math.PI * 2);
-        context.fillStyle = "#f8e2b8";
+        context.fillStyle =
+          tool === "polygon" ? POLYGON_DRAFT_COLOR : "#f8e2b8";
         context.fill();
       }
       context.restore();
@@ -409,16 +468,24 @@ function MapStage({
     draftRect,
     draftStroke,
     editingZoneId,
+    hoveredZoneId,
     image,
+    interactive,
     mode,
     polygonDraft,
+    polygonPreview,
     scene,
     size,
     snapIndicator,
+    tool,
   ]);
 
   const eventPoint = useCallback(
-    (clientX: number, clientY: number): Point | null => {
+    (
+      clientX: number,
+      clientY: number,
+      clampToMap = true,
+    ): Point | null => {
       const container = containerRef.current;
       if (!container || !image || !scene) return null;
       const bounds = container.getBoundingClientRect();
@@ -432,10 +499,17 @@ function MapStage({
           viewport.zoom +
         bounds.height / 2;
       const fitted = mapFitRect(bounds.width, bounds.height, image);
-      return normalizePoint({
+      const point = {
         x: (rawX - fitted.x) / fitted.width,
         y: (rawY - fitted.y) / fitted.height,
-      });
+      };
+      if (
+        !clampToMap &&
+        (point.x < 0 || point.x > 1 || point.y < 0 || point.y > 1)
+      ) {
+        return null;
+      }
+      return normalizePoint(point);
     },
     [image, scene],
   );
@@ -493,12 +567,14 @@ function MapStage({
       return;
     }
     if (tool === "pan") {
+      setHoveredZoneId(null);
       event.currentTarget.setPointerCapture(event.pointerId);
       gestureRef.current = {
         kind: "pan",
         startX: event.clientX,
         startY: event.clientY,
         viewport: scene.viewport,
+        moved: false,
       };
       return;
     }
@@ -528,6 +604,12 @@ function MapStage({
   const handlePointerMove = (event: ReactPointerEvent<HTMLCanvasElement>) => {
     const gesture = gestureRef.current;
     if (!scene) return;
+    if (!gesture && mode === "live" && tool === "pan") {
+      const point = eventPoint(event.clientX, event.clientY, false);
+      const zone = point ? findZoneAtPoint(point, scene.zones) : null;
+      setHoveredZoneId(zone?.id ?? null);
+      return;
+    }
     if (!gesture && tool === "polygon") {
       const rawPoint = eventPoint(event.clientX, event.clientY);
       if (!rawPoint) return;
@@ -539,6 +621,15 @@ function MapStage({
     if (gesture.kind === "pan") {
       const bounds = containerRef.current?.getBoundingClientRect();
       if (!bounds) return;
+      if (
+        Math.hypot(
+          event.clientX - gesture.startX,
+          event.clientY - gesture.startY,
+        ) >= 5
+      ) {
+        gesture.moved = true;
+      }
+      if (!gesture.moved) return;
       onViewportChange?.({
         ...gesture.viewport,
         x: clamp(
@@ -581,9 +672,24 @@ function MapStage({
     }
   };
 
-  const finishGesture = () => {
+  const finishGesture = (
+    event?: ReactPointerEvent<HTMLCanvasElement>,
+    cancelled = false,
+  ) => {
     const gesture = gestureRef.current;
     if (!gesture) return;
+    if (
+      gesture.kind === "pan" &&
+      !gesture.moved &&
+      !cancelled &&
+      event &&
+      mode === "live"
+    ) {
+      const point = eventPoint(event.clientX, event.clientY, false);
+      const zone = point ? findZoneAtPoint(point, scene?.zones ?? []) : null;
+      if (zone) onToggleZone?.(zone.id);
+      setHoveredZoneId(zone?.id ?? null);
+    }
     if (gesture.kind === "rect" && draftRect && isUsableRect(draftRect)) {
       onCreateZone?.("rect", draftRect);
     }
@@ -616,20 +722,31 @@ function MapStage({
       ref={containerRef}
       className={`map-stage map-tool-${tool}`}
       data-empty={!mapUrl}
+      data-zone-hovered={
+        interactive &&
+        mode === "live" &&
+        tool === "pan" &&
+        Boolean(hoveredZoneId)
+      }
     >
       <canvas
         ref={canvasRef}
         aria-label={
           interactive
-            ? "Carte interactive et brouillard de guerre"
+            ? mode === "live"
+              ? "Carte interactive : cliquez une zone pour changer sa visibilité"
+              : "Carte interactive et brouillard de guerre"
             : "Carte des joueurs"
         }
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={finishGesture}
-        onPointerCancel={finishGesture}
+        onPointerCancel={(event) => finishGesture(event, true)}
         onPointerLeave={() => {
-          if (!gestureRef.current) setSnapIndicator(null);
+          if (!gestureRef.current) {
+            setSnapIndicator(null);
+            setHoveredZoneId(null);
+          }
         }}
         onWheel={handleWheel}
         style={{
@@ -1009,19 +1126,25 @@ function ControllerView() {
 
   const addZone = useCallback(
     (kind: ZoneKind, points: Point[]) => {
-      updateActiveScene((scene) => ({
-        ...scene,
-        zones: [
-          ...scene.zones,
-          {
-            id: createId("zone"),
-            name: `Zone ${scene.zones.length + 1}`,
-            kind,
-            points,
-            revealed: false,
-          },
-        ],
-      }));
+      updateActiveScene((scene) => {
+        const merged =
+          kind === "polygon"
+            ? mergePolygonBoundaries(points, scene.zones)
+            : { points, zones: scene.zones };
+        return {
+          ...scene,
+          zones: [
+            ...merged.zones,
+            {
+              id: createId("zone"),
+              name: `Zone ${scene.zones.length + 1}`,
+              kind,
+              points: merged.points,
+              revealed: false,
+            },
+          ],
+        };
+      });
     },
     [updateActiveScene],
   );
@@ -1340,7 +1463,9 @@ function ControllerView() {
                   {(tool === "rect" || tool === "polygon") && (
                     <p className="snap-helper">
                       <strong>Accrochage auto</strong>
-                      Les points proches d’une zone se calent sur son contour.
+                      {tool === "polygon"
+                        ? "Les contours adjacents fusionnent dès le tracé."
+                        : "Les points proches d’une zone se calent sur son contour."}
                     </p>
                   )}
                   <div className="zone-list compact-list">
@@ -1645,7 +1770,7 @@ function ControllerView() {
                   ? "Les repères de zones ne sont visibles qu’ici."
                   : tool === "erase"
                     ? "Glissez sur la carte pour révéler."
-                    : "Glissez la carte, utilisez la molette pour zoomer."}
+                    : "Cliquez une zone pour l’afficher, glissez pour déplacer."}
               </span>
               <span className="autosave-label">Enregistrement automatique</span>
             </div>
@@ -1665,6 +1790,7 @@ function ControllerView() {
               onCreateZone={addZone}
               onMoveZoneVertex={moveZoneVertex}
               onStroke={addStroke}
+              onToggleZone={toggleZone}
               onViewportChange={(viewport) =>
                 updateActiveScene((scene) => ({ ...scene, viewport }))
               }
