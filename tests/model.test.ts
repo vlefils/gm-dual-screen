@@ -35,9 +35,11 @@ test("l’état hors zones est inclus dans l’historique du brouillard", () => 
 });
 
 test("la largeur du panneau reste dans ses limites", () => {
-  assert.equal(clampPanelWidth(8), 20);
+  assert.equal(clampPanelWidth(-8), 0);
+  assert.equal(clampPanelWidth(8), 8);
   assert.equal(clampPanelWidth(34.6), 35);
-  assert.equal(clampPanelWidth(90), 50);
+  assert.equal(clampPanelWidth(90), 90);
+  assert.equal(clampPanelWidth(108), 100);
 });
 
 test("les rectangles trop petits sont ignorés", () => {

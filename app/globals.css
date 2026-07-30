@@ -820,6 +820,10 @@ input[type="range"] {
   padding: clamp(10px, 2.2vw, 34px);
 }
 
+.player-frame[data-layout="image"] .player-image-panel {
+  border-left: 0;
+}
+
 .player-image-panel img {
   display: block;
   width: 100%;

@@ -819,19 +819,27 @@ function PlayerFrame({
   const imageUrl = scene?.activeImageId
     ? assetUrls.get(scene.activeImageId)
     : undefined;
-  const showPanel = Boolean(scene?.panelVisible && imageUrl);
   const panelWidth = clampPanelWidth(
     scene?.panelWidth ?? DEFAULT_PANEL_WIDTH,
   );
+  const showPanel = Boolean(
+    scene?.panelVisible && imageUrl && panelWidth > PANEL_WIDTH_MIN,
+  );
+  const showMap = !showPanel || panelWidth < PANEL_WIDTH_MAX;
+  const layout = showMap && showPanel ? "split" : showPanel ? "image" : "map";
 
   return (
     <div
       className={`player-frame ${className}`}
+      data-layout={layout}
       style={{
-        gridTemplateColumns: showPanel ? `minmax(0, 1fr) ${panelWidth}%` : "1fr",
+        gridTemplateColumns:
+          layout === "split"
+            ? `minmax(0, 1fr) ${panelWidth}%`
+            : "minmax(0, 1fr)",
       }}
     >
-      <MapStage scene={scene} mapUrl={mapUrl} {...mapProps} />
+      {showMap && <MapStage scene={scene} mapUrl={mapUrl} {...mapProps} />}
       {showPanel && (
         <aside className="player-image-panel" aria-label="Illustration">
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1327,6 +1335,10 @@ function ControllerView() {
   const currentHistory = activeScene
     ? historyRef.current.get(activeScene.id) ?? []
     : [];
+  const effectivePanelWidth = activeScene?.panelVisible
+    ? clampPanelWidth(activeScene.panelWidth)
+    : PANEL_WIDTH_MIN;
+  const effectiveMapWidth = PANEL_WIDTH_MAX - effectivePanelWidth;
 
   return (
     <main className="controller-shell">
@@ -1728,10 +1740,18 @@ function ControllerView() {
                       type="button"
                       className={`small-toggle ${activeScene?.panelVisible ? "is-on" : ""}`}
                       onClick={() =>
-                        updateActiveScene((scene) => ({
-                          ...scene,
-                          panelVisible: !scene.panelVisible,
-                        }))
+                        updateActiveScene((scene) => {
+                          const panelVisible = !scene.panelVisible;
+                          return {
+                            ...scene,
+                            panelVisible,
+                            panelWidth:
+                              panelVisible &&
+                              scene.panelWidth === PANEL_WIDTH_MIN
+                                ? DEFAULT_PANEL_WIDTH
+                                : scene.panelWidth,
+                          };
+                        })
                       }
                     >
                       {activeScene?.panelVisible ? "Panneau visible" : "Panneau masqué"}
@@ -1756,22 +1776,27 @@ function ControllerView() {
                   </div>
                   <label className="range-field">
                     <span>
-                      Largeur de l’image{" "}
-                      <strong>{activeScene?.panelWidth ?? DEFAULT_PANEL_WIDTH}%</strong>
+                      Répartition{" "}
+                      <strong>
+                        {effectiveMapWidth}% carte · {effectivePanelWidth}% image
+                      </strong>
                     </span>
                     <input
                       type="range"
                       min={PANEL_WIDTH_MIN}
                       max={PANEL_WIDTH_MAX}
-                      value={activeScene?.panelWidth ?? DEFAULT_PANEL_WIDTH}
-                      onChange={(event) =>
+                      aria-label="Répartition entre la carte et l’image"
+                      value={effectivePanelWidth}
+                      onChange={(event) => {
+                        const panelWidth = clampPanelWidth(
+                          Number(event.target.value),
+                        );
                         updateActiveScene((scene) => ({
                           ...scene,
-                          panelWidth: clampPanelWidth(
-                            Number(event.target.value),
-                          ),
-                        }))
-                      }
+                          panelWidth,
+                          panelVisible: panelWidth > PANEL_WIDTH_MIN,
+                        }));
+                      }}
                     />
                   </label>
                   <label className="range-field">

@@ -1,5 +1,5 @@
-export const PANEL_WIDTH_MIN = 20;
-export const PANEL_WIDTH_MAX = 50;
+export const PANEL_WIDTH_MIN = 0;
+export const PANEL_WIDTH_MAX = 100;
 export const DEFAULT_PANEL_WIDTH = 25;
 
 export type Point = {
