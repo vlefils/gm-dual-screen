@@ -37,6 +37,7 @@ export type Scene = {
   activeImageId: string | null;
   panelVisible: boolean;
   panelWidth: number;
+  outsideRevealed: boolean;
   zones: RevealZone[];
   strokes: RevealStroke[];
   viewport: MapViewport;
@@ -54,6 +55,7 @@ export type AssetRecord = {
 };
 
 export type FogSnapshot = {
+  outsideRevealed: boolean;
   zones: RevealZone[];
   strokes: RevealStroke[];
 };
@@ -87,6 +89,7 @@ export function createScene(index = 1): Scene {
     activeImageId: null,
     panelVisible: true,
     panelWidth: DEFAULT_PANEL_WIDTH,
+    outsideRevealed: false,
     zones: [],
     strokes: [],
     viewport: { zoom: 1, x: 0, y: 0 },
@@ -624,6 +627,7 @@ export function mergePolygonBoundaries(
 
 export function snapshotFog(scene: Scene): FogSnapshot {
   return {
+    outsideRevealed: Boolean(scene.outsideRevealed),
     zones: structuredClone(scene.zones),
     strokes: structuredClone(scene.strokes),
   };

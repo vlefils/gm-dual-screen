@@ -61,6 +61,7 @@ type Notice = { tone: "success" | "error"; text: string } | null;
 
 const ACTIVE_SCENE_KEY = "activeSceneId";
 const POLYGON_DRAFT_COLOR = "#58d6ff";
+const OUTSIDE_ZONE_TARGET = "__outside-zones__";
 
 function formatError(error: unknown): string {
   if (
@@ -185,6 +186,7 @@ type MapStageProps = {
   ) => void;
   onStroke?: (stroke: RevealStroke) => void;
   onToggleZone?: (zoneId: string) => void;
+  onToggleOutside?: () => void;
 };
 
 function MapStage({
@@ -202,6 +204,7 @@ function MapStage({
   onMoveZoneVertex,
   onStroke,
   onToggleZone,
+  onToggleOutside,
 }: MapStageProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -280,9 +283,26 @@ function MapStage({
     const fogContext = fog.getContext("2d");
     if (!fogContext) return;
     fogContext.setTransform(ratio, 0, 0, ratio, 0, 0);
-    fogContext.fillStyle =
-      mode === "prepare" ? "rgba(5, 7, 10, 0.58)" : "rgba(5, 7, 10, 0.97)";
+    const fogFillStyle =
+      mode === "prepare"
+        ? "rgba(5, 7, 10, 0.58)"
+        : interactive
+          ? "rgba(5, 7, 10, 0.88)"
+          : "rgba(5, 7, 10, 0.97)";
+    fogContext.fillStyle = fogFillStyle;
     fogContext.fillRect(rect.x, rect.y, rect.width, rect.height);
+
+    if (scene.outsideRevealed) {
+      fogContext.globalCompositeOperation = "destination-out";
+      fogContext.fillRect(rect.x, rect.y, rect.width, rect.height);
+      fogContext.globalCompositeOperation = "source-over";
+      fogContext.fillStyle = fogFillStyle;
+      for (const zone of scene.zones.filter((item) => !item.revealed)) {
+        drawZonePath(fogContext, zone, rect);
+        fogContext.fill();
+      }
+    }
+
     fogContext.globalCompositeOperation = "destination-out";
 
     for (const zone of scene.zones.filter((item) => item.revealed)) {
@@ -331,6 +351,17 @@ function MapStage({
 
     if (interactive && mode === "live") {
       context.save();
+      if (hoveredZoneId === OUTSIDE_ZONE_TARGET) {
+        context.lineWidth = 3;
+        context.strokeStyle = POLYGON_DRAFT_COLOR;
+        context.setLineDash([9, 6]);
+        context.strokeRect(
+          rect.x + 2,
+          rect.y + 2,
+          Math.max(0, rect.width - 4),
+          Math.max(0, rect.height - 4),
+        );
+      }
       for (const zone of scene.zones) {
         const isHovered = zone.id === hoveredZoneId;
         drawZonePath(context, zone, rect);
@@ -607,7 +638,9 @@ function MapStage({
     if (!gesture && mode === "live" && tool === "pan") {
       const point = eventPoint(event.clientX, event.clientY, false);
       const zone = point ? findZoneAtPoint(point, scene.zones) : null;
-      setHoveredZoneId(zone?.id ?? null);
+      setHoveredZoneId(
+        point ? (zone?.id ?? OUTSIDE_ZONE_TARGET) : null,
+      );
       return;
     }
     if (!gesture && tool === "polygon") {
@@ -688,7 +721,10 @@ function MapStage({
       const point = eventPoint(event.clientX, event.clientY, false);
       const zone = point ? findZoneAtPoint(point, scene?.zones ?? []) : null;
       if (zone) onToggleZone?.(zone.id);
-      setHoveredZoneId(zone?.id ?? null);
+      else if (point) onToggleOutside?.();
+      setHoveredZoneId(
+        point ? (zone?.id ?? OUTSIDE_ZONE_TARGET) : null,
+      );
     }
     if (gesture.kind === "rect" && draftRect && isUsableRect(draftRect)) {
       onCreateZone?.("rect", draftRect);
@@ -734,7 +770,7 @@ function MapStage({
         aria-label={
           interactive
             ? mode === "live"
-              ? "Carte interactive : cliquez une zone pour changer sa visibilité"
+              ? "Carte interactive : cliquez une zone ou le fond pour changer sa visibilité"
               : "Carte interactive et brouillard de guerre"
             : "Carte des joueurs"
         }
@@ -1089,6 +1125,7 @@ function ControllerView() {
       updateActiveScene((scene) => ({
         ...scene,
         mapAssetId: asset.id,
+        outsideRevealed: false,
         zones: [],
         strokes: [],
         viewport: { zoom: 1, x: 0, y: 0 },
@@ -1181,6 +1218,16 @@ function ControllerView() {
     });
   };
 
+  const toggleOutside = () => {
+    const current = currentSceneFromRefs();
+    if (!current) return;
+    rememberFog(current);
+    commitScene({
+      ...current,
+      outsideRevealed: !current.outsideRevealed,
+    });
+  };
+
   const addStroke = useCallback(
     (stroke: RevealStroke) => {
       const current = currentSceneFromRefs();
@@ -1200,6 +1247,7 @@ function ControllerView() {
     historyRef.current.set(current.id, history.slice(0, -1));
     commitScene({
       ...current,
+      outsideRevealed: previous.outsideRevealed,
       zones: previous.zones,
       strokes: previous.strokes,
     });
@@ -1214,6 +1262,7 @@ function ControllerView() {
     rememberFog(current);
     commitScene({
       ...current,
+      outsideRevealed: false,
       zones: current.zones.map((zone) => ({ ...zone, revealed: false })),
       strokes: [],
     });
@@ -1627,6 +1676,16 @@ function ControllerView() {
                     </label>
                   )}
                   <div className="zone-list">
+                    <button
+                      type="button"
+                      className={`zone-live-row ${activeScene?.outsideRevealed ? "is-revealed" : ""}`}
+                      onClick={toggleOutside}
+                    >
+                      <span>Hors zones</span>
+                      <strong>
+                        {activeScene?.outsideRevealed ? "Visible" : "Masqué"}
+                      </strong>
+                    </button>
                     {activeScene?.zones.map((zone) => (
                       <button
                         type="button"
@@ -1640,7 +1699,7 @@ function ControllerView() {
                     ))}
                     {!activeScene?.zones.length && (
                       <p className="empty-copy">
-                        Aucune zone préparée. La gomme reste disponible.
+                        Aucune zone préparée : le fond représente toute la carte.
                       </p>
                     )}
                   </div>
@@ -1770,7 +1829,7 @@ function ControllerView() {
                   ? "Les repères de zones ne sont visibles qu’ici."
                   : tool === "erase"
                     ? "Glissez sur la carte pour révéler."
-                    : "Cliquez une zone pour l’afficher, glissez pour déplacer."}
+                    : "Cliquez une zone ou le fond pour l’afficher ; glissez pour déplacer."}
               </span>
               <span className="autosave-label">Enregistrement automatique</span>
             </div>
@@ -1791,6 +1850,7 @@ function ControllerView() {
               onMoveZoneVertex={moveZoneVertex}
               onStroke={addStroke}
               onToggleZone={toggleZone}
+              onToggleOutside={toggleOutside}
               onViewportChange={(viewport) =>
                 updateActiveScene((scene) => ({ ...scene, viewport }))
               }

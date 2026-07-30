@@ -70,7 +70,12 @@ export async function getScenes(): Promise<Scene[]> {
     transaction.objectStore(SCENES_STORE).getAll() as IDBRequest<Scene[]>,
   );
   database.close();
-  return scenes.sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
+  return scenes
+    .map((scene) => ({
+      ...scene,
+      outsideRevealed: Boolean(scene.outsideRevealed),
+    }))
+    .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
 }
 
 export async function putScene(scene: Scene): Promise<void> {
@@ -304,6 +309,7 @@ export async function importBackup(
       activeImageId: original.activeImageId
         ? (assetIdMap.get(original.activeImageId) ?? null)
         : null,
+      outsideRevealed: Boolean(original.outsideRevealed),
       updatedAt: new Date().toISOString(),
     };
     await putScene(scene);

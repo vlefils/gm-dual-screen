@@ -12,6 +12,7 @@ import {
   mergePolygonDraftBoundaries,
   movePolygonVertex,
   snapPointToZoneBoundaries,
+  snapshotFog,
 } from "../app/lib/model.ts";
 
 test("une scène démarre avec un brouillard intact et un panneau à 25 %", () => {
@@ -19,7 +20,18 @@ test("une scène démarre avec un brouillard intact et un panneau à 25 %", () =
   assert.equal(scene.panelWidth, DEFAULT_PANEL_WIDTH);
   assert.deepEqual(scene.zones, []);
   assert.deepEqual(scene.strokes, []);
+  assert.equal(scene.outsideRevealed, false);
   assert.deepEqual(scene.viewport, { zoom: 1, x: 0, y: 0 });
+});
+
+test("l’état hors zones est inclus dans l’historique du brouillard", () => {
+  const scene = createScene();
+  scene.outsideRevealed = true;
+  assert.deepEqual(snapshotFog(scene), {
+    outsideRevealed: true,
+    zones: [],
+    strokes: [],
+  });
 });
 
 test("la largeur du panneau reste dans ses limites", () => {
