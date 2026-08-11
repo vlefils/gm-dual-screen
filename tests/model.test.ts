@@ -6,6 +6,7 @@ import {
   collectAssetIds,
   createScene,
   findZoneAtPoint,
+  getImageViewport,
   isPointInZone,
   isUsableRect,
   mergePolygonBoundaries,
@@ -21,7 +22,33 @@ test("une scène démarre avec un brouillard intact et un panneau à 25 %", () =
   assert.deepEqual(scene.zones, []);
   assert.deepEqual(scene.strokes, []);
   assert.equal(scene.outsideRevealed, false);
+  assert.equal(scene.scenarioMarkdown, "");
   assert.deepEqual(scene.viewport, { zoom: 1, x: 0, y: 0 });
+  assert.deepEqual(scene.imageViewports, {});
+});
+
+test("chaque illustration conserve un cadrage indépendant et borné", () => {
+  const scene = createScene();
+  scene.imageViewports = {
+    portrait: { zoom: 2.25, x: 0.3, y: -0.2 },
+    extreme: { zoom: 8, x: -4, y: 3 },
+  };
+
+  assert.deepEqual(getImageViewport(scene, "portrait"), {
+    zoom: 2.25,
+    x: 0.3,
+    y: -0.2,
+  });
+  assert.deepEqual(getImageViewport(scene, "extreme"), {
+    zoom: 4,
+    x: -1,
+    y: 1,
+  });
+  assert.deepEqual(getImageViewport(scene, "nouvelle-image"), {
+    zoom: 1,
+    x: 0,
+    y: 0,
+  });
 });
 
 test("l’état hors zones est inclus dans l’historique du brouillard", () => {

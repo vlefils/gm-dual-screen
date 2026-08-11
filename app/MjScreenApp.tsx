@@ -10,6 +10,8 @@ import {
   useRef,
   useState,
 } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   CHANNEL_NAME,
   PROTOCOL_VERSION,
@@ -26,6 +28,7 @@ import {
   createId,
   createScene,
   findZoneAtPoint,
+  getImageViewport,
   isUsableRect,
   mergePolygonBoundaries,
   mergePolygonDraftBoundaries,
@@ -55,7 +58,7 @@ import {
   setSetting,
 } from "./lib/storage";
 
-type AppMode = "prepare" | "live";
+type AppMode = "prepare" | "live" | "scenario";
 type MapTool = "pan" | "rect" | "polygon" | "vertices" | "erase";
 type Notice = { tone: "success" | "error"; text: string } | null;
 
@@ -805,12 +808,109 @@ function MapStage({
 type PlayerFrameProps = MapStageProps & {
   assetUrls: Map<string, string>;
   className?: string;
+  onImageViewportChange?: (viewport: MapViewport) => void;
 };
+
+function ImageStage({
+  src,
+  viewport,
+  interactive = false,
+  onViewportChange,
+}: {
+  src: string;
+  viewport: MapViewport;
+  interactive?: boolean;
+  onViewportChange?: (viewport: MapViewport) => void;
+}) {
+  const containerRef = useRef<HTMLElement>(null);
+  const gestureRef = useRef<{
+    startX: number;
+    startY: number;
+    viewport: MapViewport;
+  } | null>(null);
+
+  const handlePointerDown = (event: ReactPointerEvent<HTMLElement>) => {
+    if (!interactive || (event.pointerType === "mouse" && event.button !== 0)) {
+      return;
+    }
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    gestureRef.current = {
+      startX: event.clientX,
+      startY: event.clientY,
+      viewport,
+    };
+  };
+
+  const handlePointerMove = (event: ReactPointerEvent<HTMLElement>) => {
+    const gesture = gestureRef.current;
+    const bounds = containerRef.current?.getBoundingClientRect();
+    if (!gesture || !bounds) return;
+    onViewportChange?.({
+      ...gesture.viewport,
+      x: clamp(
+        gesture.viewport.x + (event.clientX - gesture.startX) / bounds.width,
+        -1,
+        1,
+      ),
+      y: clamp(
+        gesture.viewport.y + (event.clientY - gesture.startY) / bounds.height,
+        -1,
+        1,
+      ),
+    });
+  };
+
+  const finishGesture = (event: ReactPointerEvent<HTMLElement>) => {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    gestureRef.current = null;
+  };
+
+  const handleWheel = (event: ReactWheelEvent<HTMLElement>) => {
+    if (!interactive) return;
+    event.preventDefault();
+    const factor = event.deltaY < 0 ? 1.12 : 0.89;
+    onViewportChange?.({
+      ...viewport,
+      zoom: clamp(viewport.zoom * factor, 0.75, 4),
+    });
+  };
+
+  return (
+    <aside
+      ref={containerRef}
+      className={`player-image-panel ${interactive ? "is-interactive" : ""}`}
+      aria-label={
+        interactive
+          ? "Illustration interactive : glissez pour la recadrer et utilisez la molette pour zoomer"
+          : "Illustration"
+      }
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={finishGesture}
+      onPointerCancel={finishGesture}
+      onWheel={handleWheel}
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={src}
+        alt=""
+        draggable={false}
+        style={{
+          transform: `translate(${viewport.x * 100}%, ${viewport.y * 100}%) scale(${viewport.zoom})`,
+        }}
+      />
+    </aside>
+  );
+}
 
 function PlayerFrame({
   scene,
   assetUrls,
   className = "",
+  onImageViewportChange,
   ...mapProps
 }: PlayerFrameProps) {
   const mapUrl = scene?.mapAssetId
@@ -827,6 +927,13 @@ function PlayerFrame({
   );
   const showMap = !showPanel || panelWidth < PANEL_WIDTH_MAX;
   const layout = showMap && showPanel ? "split" : showPanel ? "image" : "map";
+  const imageViewport = getImageViewport(
+    scene,
+    scene?.activeImageId ?? null,
+  );
+  const imageInteractive = Boolean(
+    mapProps.interactive && mapProps.mode === "live",
+  );
 
   return (
     <div
@@ -840,11 +947,13 @@ function PlayerFrame({
       }}
     >
       {showMap && <MapStage scene={scene} mapUrl={mapUrl} {...mapProps} />}
-      {showPanel && (
-        <aside className="player-image-panel" aria-label="Illustration">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={imageUrl} alt="" />
-        </aside>
+      {showPanel && imageUrl && (
+        <ImageStage
+          src={imageUrl}
+          viewport={imageViewport}
+          interactive={imageInteractive}
+          onViewportChange={onImageViewportChange}
+        />
       )}
     </div>
   );
@@ -908,6 +1017,121 @@ function PlayerView() {
         </button>
       </div>
     </main>
+  );
+}
+
+function ScenarioWorkspace({
+  scene,
+  scenes,
+  activeSceneId,
+  onSceneChange,
+  onMarkdownChange,
+}: {
+  scene: Scene | null;
+  scenes: Scene[];
+  activeSceneId: string;
+  onSceneChange: (sceneId: string) => void;
+  onMarkdownChange: (markdown: string) => void;
+}) {
+  const markdown = scene?.scenarioMarkdown ?? "";
+  const wordCount = markdown.trim()
+    ? markdown.trim().split(/\s+/u).length
+    : 0;
+  const lineCount = markdown ? markdown.split(/\r\n|\r|\n/u).length : 0;
+
+  return (
+    <section className="scenario-workspace" aria-label="Scénario de la scène">
+      <header className="scenario-toolbar">
+        <div className="scenario-scene-picker">
+          <label htmlFor="scenario-scene">Scénario de</label>
+          <select
+            id="scenario-scene"
+            value={activeSceneId}
+            onChange={(event) => onSceneChange(event.target.value)}
+          >
+            {scenes.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="scenario-stats" aria-label="Statistiques du scénario">
+          <span>{wordCount.toLocaleString("fr-FR")} mots</span>
+          <span>{lineCount.toLocaleString("fr-FR")} lignes</span>
+          <span className="scenario-saved">Enregistrement automatique</span>
+        </div>
+      </header>
+
+      <div className="scenario-split">
+        <section className="scenario-editor-panel">
+          <div className="scenario-panel-heading">
+            <div>
+              <span className="section-eyebrow">MANUSCRIT</span>
+              <h1>Édition Markdown</h1>
+            </div>
+            <span className="scenario-format-hint"># Titre · **gras** · &gt; citation</span>
+          </div>
+          <textarea
+            className="scenario-editor"
+            aria-label="Texte du scénario en Markdown"
+            value={markdown}
+            onChange={(event) => onMarkdownChange(event.target.value)}
+            placeholder={
+              "# La Crypte du roi sans nom\n\n> À lire à voix haute : une brume froide rampe entre les pierres.\n\n## Entrée dans les ruines\n\n- **Objectif :** retrouver le sceau brisé\n- **Danger :** 3 gardiens spectraux\n\n---\n\n### Si les héros fouillent l’autel\n\nIls découvrent une clé d’obsidienne."
+            }
+            spellCheck
+          />
+          <footer className="scenario-editor-footer">
+            Markdown standard · tableaux et listes à cocher pris en charge
+          </footer>
+        </section>
+
+        <section className="scenario-preview-panel" aria-label="Aperçu du scénario">
+          <article className="scenario-page">
+            <header className="scenario-page-header">
+              <span>Chronique du maître du jeu</span>
+              <h2>{scene?.name ?? "Scène sans titre"}</h2>
+              <div className="scenario-ornament" aria-hidden="true">
+                <span />
+                ◆
+                <span />
+              </div>
+            </header>
+            {markdown.trim() ? (
+              <div className="scenario-markdown">
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    a: ({ node, ...props }) => {
+                      void node;
+                      return (
+                        <a
+                          {...props}
+                          target="_blank"
+                          rel="noreferrer noopener"
+                        />
+                      );
+                    },
+                  }}
+                >
+                  {markdown}
+                </ReactMarkdown>
+              </div>
+            ) : (
+              <div className="scenario-empty">
+                <span className="scenario-empty-mark" aria-hidden="true">✦</span>
+                <h3>Votre aventure commence ici</h3>
+                <p>
+                  Collez votre scénario dans le manuscrit. Les titres, citations,
+                  listes, tableaux et notes prendront forme dans cet aperçu.
+                </p>
+              </div>
+            )}
+          </article>
+        </section>
+      </div>
+    </section>
   );
 }
 
@@ -1339,6 +1563,10 @@ function ControllerView() {
     ? clampPanelWidth(activeScene.panelWidth)
     : PANEL_WIDTH_MIN;
   const effectiveMapWidth = PANEL_WIDTH_MAX - effectivePanelWidth;
+  const activeImageViewport = getImageViewport(
+    activeScene,
+    activeScene?.activeImageId ?? null,
+  );
 
   return (
     <main className="controller-shell">
@@ -1361,6 +1589,13 @@ function ControllerView() {
             onClick={() => setAppMode("live")}
           >
             Direct
+          </button>
+          <button
+            type="button"
+            className={mode === "scenario" ? "is-active" : ""}
+            onClick={() => setAppMode("scenario")}
+          >
+            Scénario
           </button>
         </nav>
         <div className="header-actions">
@@ -1385,8 +1620,22 @@ function ControllerView() {
         </div>
       )}
 
-      <div className="workspace">
-        <aside className="control-panel">
+      <div
+        className={`workspace ${mode === "scenario" ? "scenario-mode" : ""}`}
+      >
+        {mode === "scenario" ? (
+          <ScenarioWorkspace
+            scene={activeScene}
+            scenes={scenes}
+            activeSceneId={activeSceneId}
+            onSceneChange={changeActiveScene}
+            onMarkdownChange={(scenarioMarkdown) =>
+              updateActiveScene((scene) => ({ ...scene, scenarioMarkdown }))
+            }
+          />
+        ) : (
+          <>
+            <aside className="control-panel">
           <div className="panel-scroll">
             <section className="control-section scene-section">
               <div className="section-heading">
@@ -1616,14 +1865,21 @@ function ControllerView() {
                       }))
                     }
                     onRemove={(id) =>
-                      updateActiveScene((scene) => ({
-                        ...scene,
-                        galleryAssetIds: scene.galleryAssetIds.filter(
-                          (assetId) => assetId !== id,
-                        ),
-                        activeImageId:
-                          scene.activeImageId === id ? null : scene.activeImageId,
-                      }))
+                      updateActiveScene((scene) => {
+                        const imageViewports = { ...scene.imageViewports };
+                        delete imageViewports[id];
+                        return {
+                          ...scene,
+                          galleryAssetIds: scene.galleryAssetIds.filter(
+                            (assetId) => assetId !== id,
+                          ),
+                          activeImageId:
+                            scene.activeImageId === id
+                              ? null
+                              : scene.activeImageId,
+                          imageViewports,
+                        };
+                      })
                     }
                   />
                 </section>
@@ -1824,18 +2080,70 @@ function ControllerView() {
                       }
                     />
                   </label>
-                  <button
-                    type="button"
-                    className="wide-button"
-                    onClick={() =>
-                      updateActiveScene((scene) => ({
-                        ...scene,
-                        viewport: { zoom: 1, x: 0, y: 0 },
-                      }))
-                    }
-                  >
-                    Recentrer la carte
-                  </button>
+                  <label className="range-field">
+                    <span>
+                      Zoom image{" "}
+                      <strong>
+                        {Math.round(activeImageViewport.zoom * 100)}%
+                      </strong>
+                    </span>
+                    <input
+                      type="range"
+                      min="75"
+                      max="400"
+                      disabled={!activeScene?.activeImageId}
+                      value={Math.round(activeImageViewport.zoom * 100)}
+                      onChange={(event) => {
+                        const zoom = Number(event.target.value) / 100;
+                        updateActiveScene((scene) => {
+                          const imageId = scene.activeImageId;
+                          if (!imageId) return scene;
+                          return {
+                            ...scene,
+                            imageViewports: {
+                              ...scene.imageViewports,
+                              [imageId]: {
+                                ...getImageViewport(scene, imageId),
+                                zoom,
+                              },
+                            },
+                          };
+                        });
+                      }}
+                    />
+                  </label>
+                  <div className="button-grid">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateActiveScene((scene) => ({
+                          ...scene,
+                          viewport: { zoom: 1, x: 0, y: 0 },
+                        }))
+                      }
+                    >
+                      Recentrer la carte
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!activeScene?.activeImageId}
+                      onClick={() =>
+                        updateActiveScene((scene) => {
+                          const imageId = scene.activeImageId;
+                          if (!imageId) return scene;
+                          return {
+                            ...scene,
+                            imageViewports: {
+                              ...scene.imageViewports,
+                              [imageId]: { zoom: 1, x: 0, y: 0 },
+                            },
+                          };
+                        })
+                      }
+                    >
+                      Recentrer l’image
+                    </button>
+                  </div>
                 </section>
               </>
             )}
@@ -1854,7 +2162,7 @@ function ControllerView() {
                   ? "Les repères de zones ne sont visibles qu’ici."
                   : tool === "erase"
                     ? "Glissez sur la carte pour révéler."
-                    : "Cliquez une zone ou le fond pour l’afficher ; glissez pour déplacer."}
+                    : "Cliquez une zone ou le fond pour l’afficher ; glissez la carte ou l’image pour cadrer."}
               </span>
               <span className="autosave-label">Enregistrement automatique</span>
             </div>
@@ -1879,6 +2187,19 @@ function ControllerView() {
               onViewportChange={(viewport) =>
                 updateActiveScene((scene) => ({ ...scene, viewport }))
               }
+              onImageViewportChange={(viewport) =>
+                updateActiveScene((scene) => {
+                  const imageId = scene.activeImageId;
+                  if (!imageId) return scene;
+                  return {
+                    ...scene,
+                    imageViewports: {
+                      ...scene.imageViewports,
+                      [imageId]: viewport,
+                    },
+                  };
+                })
+              }
             />
           </div>
           <div className="preview-footer">
@@ -1889,7 +2210,9 @@ function ControllerView() {
                 : "Importez une carte pour commencer"}
             </span>
           </div>
-        </section>
+            </section>
+          </>
+        )}
       </div>
     </main>
   );

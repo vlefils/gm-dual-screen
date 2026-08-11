@@ -73,6 +73,12 @@ export async function getScenes(): Promise<Scene[]> {
   return scenes
     .map((scene) => ({
       ...scene,
+      scenarioMarkdown:
+        typeof scene.scenarioMarkdown === "string" ? scene.scenarioMarkdown : "",
+      imageViewports:
+        scene.imageViewports && typeof scene.imageViewports === "object"
+          ? scene.imageViewports
+          : {},
       outsideRevealed: Boolean(scene.outsideRevealed),
     }))
     .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
@@ -296,10 +302,22 @@ export async function importBackup(
     }
     usedNames.add(name);
 
+    const imageViewports: Scene["imageViewports"] = {};
+    for (const [oldAssetId, viewport] of Object.entries(
+      original.imageViewports ?? {},
+    )) {
+      const newAssetId = assetIdMap.get(oldAssetId);
+      if (newAssetId) imageViewports[newAssetId] = viewport;
+    }
+
     const scene: Scene = {
       ...structuredClone(original),
       id: createId("scene"),
       name,
+      scenarioMarkdown:
+        typeof original.scenarioMarkdown === "string"
+          ? original.scenarioMarkdown
+          : "",
       mapAssetId: original.mapAssetId
         ? (assetIdMap.get(original.mapAssetId) ?? null)
         : null,
@@ -309,6 +327,7 @@ export async function importBackup(
       activeImageId: original.activeImageId
         ? (assetIdMap.get(original.activeImageId) ?? null)
         : null,
+      imageViewports,
       outsideRevealed: Boolean(original.outsideRevealed),
       updatedAt: new Date().toISOString(),
     };

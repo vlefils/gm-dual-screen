@@ -32,9 +32,11 @@ export type MapViewport = {
 export type Scene = {
   id: string;
   name: string;
+  scenarioMarkdown: string;
   mapAssetId: string | null;
   galleryAssetIds: string[];
   activeImageId: string | null;
+  imageViewports: Record<string, MapViewport>;
   panelVisible: boolean;
   panelWidth: number;
   outsideRevealed: boolean;
@@ -84,9 +86,11 @@ export function createScene(index = 1): Scene {
   return {
     id: createId("scene"),
     name: `Scène ${index}`,
+    scenarioMarkdown: "",
     mapAssetId: null,
     galleryAssetIds: [],
     activeImageId: null,
+    imageViewports: {},
     panelVisible: true,
     panelWidth: DEFAULT_PANEL_WIDTH,
     outsideRevealed: false,
@@ -112,6 +116,18 @@ export function clamp(value: number, min: number, max: number): number {
 
 export function clampPanelWidth(value: number): number {
   return clamp(Math.round(value), PANEL_WIDTH_MIN, PANEL_WIDTH_MAX);
+}
+
+export function getImageViewport(
+  scene: Pick<Scene, "imageViewports"> | null,
+  assetId: string | null,
+): MapViewport {
+  const viewport = assetId ? scene?.imageViewports?.[assetId] : undefined;
+  return {
+    zoom: clamp(Number(viewport?.zoom) || 1, 0.75, 4),
+    x: clamp(Number(viewport?.x) || 0, -1, 1),
+    y: clamp(Number(viewport?.y) || 0, -1, 1),
+  };
 }
 
 export function normalizePoint(point: Point): Point {

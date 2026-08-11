@@ -36,7 +36,9 @@ GitHub Pages après un push sur `main` ou `master`.
 
 - cartes et illustrations PNG, JPEG ou WebP, jusqu’à 30 Mo par fichier ;
 - scènes, zones rectangulaires ou polygonales et révélations à la gomme ;
+- scénario Markdown par scène avec aperçu de lecture dédié ;
 - édition des sommets et fusion automatique des frontières polygonales adjacentes ;
 - révélation directe des zones ou du fond hors zones depuis la console MJ ;
 - répartition libre de 0 à 100 % entre la carte et l’illustration ;
+- zoom et recadrage indépendants mémorisés pour chaque illustration ;
 - sauvegarde complète `.mjscreen` avec fusion non destructive à l’import.
