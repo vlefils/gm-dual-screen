@@ -57,6 +57,10 @@ import {
   saveImageFile,
   setSetting,
 } from "./lib/storage";
+import {
+  splitScenarioMarkdown,
+  type EncounterSheetData,
+} from "./lib/scenario";
 
 type AppMode = "prepare" | "live" | "scenario";
 type MapTool = "pan" | "rect" | "polygon" | "vertices" | "erase";
@@ -1020,6 +1024,96 @@ function PlayerView() {
   );
 }
 
+function MarkdownContent({
+  markdown,
+  className = "scenario-markdown",
+}: {
+  markdown: string;
+  className?: string;
+}) {
+  return (
+    <div className={className}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          a: ({ node, ...props }) => {
+            void node;
+            return (
+              <a {...props} target="_blank" rel="noreferrer noopener" />
+            );
+          },
+        }}
+      >
+        {markdown}
+      </ReactMarkdown>
+    </div>
+  );
+}
+
+function EncounterSheet({ sheet }: { sheet: EncounterSheetData }) {
+  return (
+    <article className="encounter-sheet" aria-label={`Fiche de ${sheet.title}`}>
+      <header className="encounter-header">
+        <div className="encounter-heading-row">
+          <div>
+            <span className="encounter-kicker">Encounter détecté</span>
+            <h1>{sheet.title}</h1>
+          </div>
+          {sheet.challengeRating && (
+            <span className="encounter-rating">{sheet.challengeRating}</span>
+          )}
+        </div>
+        {sheet.subtitle && <p className="encounter-subtitle">{sheet.subtitle}</p>}
+      </header>
+
+      {sheet.descriptionMarkdown && (
+        <MarkdownContent
+          markdown={sheet.descriptionMarkdown}
+          className="encounter-description scenario-markdown"
+        />
+      )}
+
+      <div className="encounter-stat-block">
+        <dl className="encounter-vitals">
+          {sheet.vitals.map((field) => (
+            <div key={field.label}>
+              <dt>{field.label}</dt>
+              <dd>{field.value}</dd>
+            </div>
+          ))}
+        </dl>
+
+        <dl className="encounter-abilities">
+          {sheet.abilities.map((field) => (
+            <div key={field.label}>
+              <dt>{field.label}</dt>
+              <dd>{field.value}</dd>
+            </div>
+          ))}
+        </dl>
+
+        {sheet.details.length > 0 && (
+          <dl className="encounter-details">
+            {sheet.details.map((field) => (
+              <div key={field.label}>
+                <dt>{field.label}</dt>
+                <dd>{field.value}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
+      </div>
+
+      {sheet.bodyMarkdown && (
+        <MarkdownContent
+          markdown={sheet.bodyMarkdown}
+          className="encounter-body scenario-markdown"
+        />
+      )}
+    </article>
+  );
+}
+
 function ScenarioWorkspace({
   scene,
   scenes,
@@ -1038,6 +1132,13 @@ function ScenarioWorkspace({
     ? markdown.trim().split(/\s+/u).length
     : 0;
   const lineCount = markdown ? markdown.split(/\r\n|\r|\n/u).length : 0;
+  const scenarioSegments = useMemo(
+    () => splitScenarioMarkdown(markdown),
+    [markdown],
+  );
+  const encounterCount = scenarioSegments.filter(
+    (segment) => segment.kind === "encounter",
+  ).length;
 
   return (
     <section className="scenario-workspace" aria-label="Scénario de la scène">
@@ -1059,6 +1160,11 @@ function ScenarioWorkspace({
         <div className="scenario-stats" aria-label="Statistiques du scénario">
           <span>{wordCount.toLocaleString("fr-FR")} mots</span>
           <span>{lineCount.toLocaleString("fr-FR")} lignes</span>
+          <span className="scenario-encounter-count">
+            {encounterCount
+              ? `${encounterCount} fiche${encounterCount > 1 ? "s" : ""} détectée${encounterCount > 1 ? "s" : ""}`
+              : "Détection auto"}
+          </span>
           <span className="scenario-saved">Enregistrement automatique</span>
         </div>
       </header>
@@ -1083,12 +1189,14 @@ function ScenarioWorkspace({
             spellCheck
           />
           <footer className="scenario-editor-footer">
-            Markdown standard · tableaux et listes à cocher pris en charge
+            Markdown standard · fiches de rencontre détectées automatiquement
           </footer>
         </section>
 
         <section className="scenario-preview-panel" aria-label="Aperçu du scénario">
-          <article className="scenario-page">
+          <article
+            className={`scenario-page ${encounterCount ? "has-encounter" : ""}`}
+          >
             <header className="scenario-page-header">
               <span>Chronique du maître du jeu</span>
               <h2>{scene?.name ?? "Scène sans titre"}</h2>
@@ -1099,24 +1207,17 @@ function ScenarioWorkspace({
               </div>
             </header>
             {markdown.trim() ? (
-              <div className="scenario-markdown">
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm]}
-                  components={{
-                    a: ({ node, ...props }) => {
-                      void node;
-                      return (
-                        <a
-                          {...props}
-                          target="_blank"
-                          rel="noreferrer noopener"
-                        />
-                      );
-                    },
-                  }}
-                >
-                  {markdown}
-                </ReactMarkdown>
+              <div className="scenario-document">
+                {scenarioSegments.map((segment, index) =>
+                  segment.kind === "encounter" ? (
+                    <EncounterSheet key={`encounter-${index}`} sheet={segment.sheet} />
+                  ) : (
+                    <MarkdownContent
+                      key={`markdown-${index}`}
+                      markdown={segment.markdown}
+                    />
+                  ),
+                )}
               </div>
             ) : (
               <div className="scenario-empty">
