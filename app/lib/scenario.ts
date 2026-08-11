@@ -4,6 +4,7 @@ export type EncounterField = {
 };
 
 export type EncounterSheetData = {
+  headingLevel: 1 | 2;
   title: string;
   subtitle: string | null;
   challengeRating: string | null;
@@ -35,19 +36,28 @@ const ABILITY_LABELS = new Set([
 ]);
 
 function normalizedLabel(label: string): string {
-  return label.trim().normalize("NFD").replace(/[\u0300-\u036f]/gu, "").toUpperCase();
+  return label
+    .trim()
+    .replace(/\s*[:.]\s*$/u, "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/gu, "")
+    .toUpperCase();
 }
 
 function parseField(line: string): EncounterField | null {
-  const match = /^\s*\*\*([^*]+)\*\*\s+(.+?)\s*$/u.exec(line);
+  const match = /^\s*(?:[-+*]\s+)?\*\*([^*]+)\*\*\s+(.+?)\s*$/u.exec(line);
   if (!match) return null;
   return { label: match[1].trim(), value: match[2].trim() };
 }
 
 function introMarkdown(markdown: string): string {
-  const dividerIndex = markdown.search(/^\s*---\s*$/mu);
-  if (dividerIndex >= 0) return markdown.slice(0, dividerIndex);
-  return markdown;
+  const lines = markdown.split(/\r\n|\r|\n/u);
+  for (let index = 1; index < lines.length; index += 1) {
+    if (/^\s*---\s*$/u.test(lines[index]) || /^#{1,6}\s+/u.test(lines[index])) {
+      return lines.slice(0, index).join("\n");
+    }
+  }
+  return lines.join("\n");
 }
 
 export function isEncounterMarkdown(markdown: string): boolean {
@@ -76,7 +86,7 @@ function findBodyStart(lines: string[]): { introEnd: number; bodyStart: number }
     if (foundEncounterField && /^\s*---\s*$/u.test(lines[index])) {
       return { introEnd: index, bodyStart: index + 1 };
     }
-    if (foundEncounterField && /^##\s+/u.test(lines[index])) {
+    if (foundEncounterField && /^#{1,6}\s+/u.test(lines[index])) {
       return { introEnd: index, bodyStart: index };
     }
   }
@@ -85,7 +95,13 @@ function findBodyStart(lines: string[]): { introEnd: number; bodyStart: number }
 
 export function parseEncounterMarkdown(markdown: string): EncounterSheetData {
   const lines = markdown.split(/\r\n|\r|\n/u);
-  const title = lines[0]?.replace(/^#\s+/u, "").trim() || "Encounter";
+  const headingMatch = /^(#{1,2})\s+(.+)$/u.exec(lines[0] ?? "");
+  const headingLevel = (headingMatch?.[1].length === 2 ? 2 : 1) as 1 | 2;
+  const rawTitle = headingMatch?.[2].trim() || "Encounter";
+  const title =
+    rawTitle
+      .replace(/\s*[—–-]\s*FP\s*[0-9]+(?:[.,/]\d+)?\s*$/iu, "")
+      .trim() || rawTitle;
   const { introEnd, bodyStart } = findBodyStart(lines);
   let cursor = 1;
   while (cursor < introEnd && !lines[cursor].trim()) cursor += 1;
@@ -123,10 +139,11 @@ export function parseEncounterMarkdown(markdown: string): EncounterSheetData {
   }
 
   const challengeMatch = /\bFP\s*([0-9]+(?:[.,/]\d+)?)/iu.exec(
-    `${subtitle ?? ""}\n${lines.slice(cursor, introEnd).join("\n")}`,
+    `${rawTitle}\n${subtitle ?? ""}\n${lines.slice(cursor, introEnd).join("\n")}`,
   );
 
   return {
+    headingLevel,
     title,
     subtitle,
     challengeRating: challengeMatch ? `FP ${challengeMatch[1]}` : null,
@@ -143,31 +160,42 @@ export function parseEncounterMarkdown(markdown: string): EncounterSheetData {
 
 export function splitScenarioMarkdown(markdown: string): ScenarioSegment[] {
   if (!markdown.trim()) return [];
-  const headings = [...markdown.matchAll(/^#(?!#)\s+.+$/gmu)];
-  if (!headings.length) return [{ kind: "markdown", markdown }];
-
+  const headings = [...markdown.matchAll(/^(#{1,2})\s+.+$/gmu)].map(
+    (match) => ({
+      index: match.index ?? 0,
+      level: match[1].length,
+    }),
+  );
   const segments: ScenarioSegment[] = [];
-  const firstHeadingIndex = headings[0].index ?? 0;
-  if (firstHeadingIndex > 0) {
-    const preamble = markdown.slice(0, firstHeadingIndex);
-    if (preamble.trim()) segments.push({ kind: "markdown", markdown: preamble });
-  }
+  let cursor = 0;
+  let headingIndex = 0;
 
-  headings.forEach((heading, index) => {
-    const start = heading.index ?? 0;
-    const end = headings[index + 1]?.index ?? markdown.length;
-    const section = markdown.slice(start, end).trim();
-    if (!section) return;
+  while (headingIndex < headings.length) {
+    const heading = headings[headingIndex];
+    if (heading.index < cursor) {
+      headingIndex += 1;
+      continue;
+    }
+    const boundary = headings
+      .slice(headingIndex + 1)
+      .find((candidate) => candidate.level <= heading.level);
+    const end = boundary?.index ?? markdown.length;
+    const section = markdown.slice(heading.index, end).trim();
     if (isEncounterMarkdown(section)) {
+      const before = markdown.slice(cursor, heading.index);
+      if (before.trim()) segments.push({ kind: "markdown", markdown: before });
       segments.push({
         kind: "encounter",
         markdown: section,
         sheet: parseEncounterMarkdown(section),
       });
-    } else {
-      segments.push({ kind: "markdown", markdown: section });
+      cursor = end;
     }
-  });
+    headingIndex += 1;
+  }
 
-  return segments;
+  const remainder = markdown.slice(cursor);
+  if (remainder.trim()) segments.push({ kind: "markdown", markdown: remainder });
+
+  return segments.length ? segments : [{ kind: "markdown", markdown }];
 }

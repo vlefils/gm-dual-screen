@@ -680,6 +680,24 @@ input[type="range"] {
   text-transform: none;
 }
 
+.encounter-level-2 .encounter-body.scenario-markdown h3 {
+  margin: 27px 0 10px;
+  border-bottom: 2px solid #9a573a;
+  padding-bottom: 5px;
+  color: #71311f;
+  font-size: 19px;
+  font-style: normal;
+  font-weight: 650;
+}
+
+.encounter-level-2 .encounter-body.scenario-markdown h3:first-child {
+  margin-top: 0;
+}
+
+.encounter-body.scenario-markdown p > strong:first-child {
+  color: #652f20;
+}
+
 .encounter-body.scenario-markdown p,
 .encounter-body.scenario-markdown ul,
 .encounter-body.scenario-markdown ol {

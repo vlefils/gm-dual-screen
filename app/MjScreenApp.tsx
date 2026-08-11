@@ -1052,7 +1052,10 @@ function MarkdownContent({
 
 function EncounterSheet({ sheet }: { sheet: EncounterSheetData }) {
   return (
-    <article className="encounter-sheet" aria-label={`Fiche de ${sheet.title}`}>
+    <article
+      className={`encounter-sheet encounter-level-${sheet.headingLevel}`}
+      aria-label={`Fiche de ${sheet.title}`}
+    >
       <header className="encounter-header">
         <div className="encounter-heading-row">
           <div>
