@@ -307,6 +307,14 @@ input[type="range"] {
   min-width: 0;
 }
 
+.scenario-toolbar-meta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
+}
+
 .scenario-stats {
   display: flex;
   align-items: center;
@@ -334,11 +342,41 @@ input[type="range"] {
   color: #a9946c;
 }
 
+.scenario-view-toggle {
+  flex: none;
+  min-height: 34px;
+  border-color: #4b535e;
+  background: #171b20;
+  padding: 0 11px;
+  color: var(--muted-strong);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.scenario-view-toggle[aria-pressed="true"] {
+  border-color: rgba(215, 173, 100, 0.65);
+  background: rgba(215, 173, 100, 0.11);
+  color: var(--accent-bright);
+}
+
 .scenario-split {
   display: grid;
   grid-template-columns: minmax(330px, 0.82fr) minmax(430px, 1.18fr);
   min-width: 0;
   min-height: 0;
+}
+
+.scenario-split.is-reading {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.scenario-split.is-reading .scenario-preview-panel {
+  padding-inline: clamp(28px, 5vw, 76px);
+}
+
+.scenario-split.is-reading .scenario-page,
+.scenario-split.is-reading .scenario-page.has-encounter {
+  width: min(100%, 1080px);
 }
 
 .scenario-editor-panel {
@@ -1648,6 +1686,10 @@ input[type="range"] {
     padding-inline: 20px;
   }
 
+  .scenario-toolbar-meta {
+    gap: 10px;
+  }
+
   .scenario-format-hint,
   .scenario-stats span:nth-child(2) {
     display: none;
@@ -1701,8 +1743,16 @@ input[type="range"] {
     display: none;
   }
 
+  .scenario-view-toggle {
+    padding-inline: 9px;
+  }
+
   .scenario-split {
     grid-template-columns: minmax(280px, 0.8fr) minmax(0, 1.2fr);
+  }
+
+  .scenario-split.is-reading {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .scenario-page {

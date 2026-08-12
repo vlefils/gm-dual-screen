@@ -1130,6 +1130,7 @@ function ScenarioWorkspace({
   onSceneChange: (sceneId: string) => void;
   onMarkdownChange: (markdown: string) => void;
 }) {
+  const [editorVisible, setEditorVisible] = useState(true);
   const markdown = scene?.scenarioMarkdown ?? "";
   const wordCount = markdown.trim()
     ? markdown.trim().split(/\s+/u).length
@@ -1160,41 +1161,56 @@ function ScenarioWorkspace({
             ))}
           </select>
         </div>
-        <div className="scenario-stats" aria-label="Statistiques du scénario">
-          <span>{wordCount.toLocaleString("fr-FR")} mots</span>
-          <span>{lineCount.toLocaleString("fr-FR")} lignes</span>
-          <span className="scenario-encounter-count">
-            {encounterCount
-              ? `${encounterCount} fiche${encounterCount > 1 ? "s" : ""} détectée${encounterCount > 1 ? "s" : ""}`
-              : "Détection auto"}
-          </span>
-          <span className="scenario-saved">Enregistrement automatique</span>
+        <div className="scenario-toolbar-meta">
+          <div className="scenario-stats" aria-label="Statistiques du scénario">
+            <span>{wordCount.toLocaleString("fr-FR")} mots</span>
+            <span>{lineCount.toLocaleString("fr-FR")} lignes</span>
+            <span className="scenario-encounter-count">
+              {encounterCount
+                ? `${encounterCount} fiche${encounterCount > 1 ? "s" : ""} détectée${encounterCount > 1 ? "s" : ""}`
+                : "Détection auto"}
+            </span>
+            <span className="scenario-saved">Enregistrement automatique</span>
+          </div>
+          <button
+            type="button"
+            className="scenario-view-toggle"
+            aria-controls="scenario-editor-panel"
+            aria-pressed={!editorVisible}
+            onClick={() => setEditorVisible((visible) => !visible)}
+          >
+            {editorVisible ? "Masquer l’éditeur" : "Afficher l’éditeur"}
+          </button>
         </div>
       </header>
 
-      <div className="scenario-split">
-        <section className="scenario-editor-panel">
-          <div className="scenario-panel-heading">
-            <div>
-              <span className="section-eyebrow">MANUSCRIT</span>
-              <h1>Édition Markdown</h1>
+      <div className={`scenario-split ${editorVisible ? "" : "is-reading"}`}>
+        {editorVisible && (
+          <section className="scenario-editor-panel" id="scenario-editor-panel">
+            <div className="scenario-panel-heading">
+              <div>
+                <span className="section-eyebrow">MANUSCRIT</span>
+                <h1>Édition Markdown</h1>
+              </div>
+              <span className="scenario-format-hint">
+                # Titre · **gras** · &gt; citation
+              </span>
             </div>
-            <span className="scenario-format-hint"># Titre · **gras** · &gt; citation</span>
-          </div>
-          <textarea
-            className="scenario-editor"
-            aria-label="Texte du scénario en Markdown"
-            value={markdown}
-            onChange={(event) => onMarkdownChange(event.target.value)}
-            placeholder={
-              "# La Crypte du roi sans nom\n\n> À lire à voix haute : une brume froide rampe entre les pierres.\n\n## Entrée dans les ruines\n\n- **Objectif :** retrouver le sceau brisé\n- **Danger :** 3 gardiens spectraux\n\n---\n\n### Si les héros fouillent l’autel\n\nIls découvrent une clé d’obsidienne."
-            }
-            spellCheck
-          />
-          <footer className="scenario-editor-footer">
-            Markdown standard · fiches de rencontre détectées automatiquement
-          </footer>
-        </section>
+            <textarea
+              className="scenario-editor"
+              aria-label="Texte du scénario en Markdown"
+              value={markdown}
+              onChange={(event) => onMarkdownChange(event.target.value)}
+              placeholder={
+                "# La Crypte du roi sans nom\n\n> À lire à voix haute : une brume froide rampe entre les pierres.\n\n## Entrée dans les ruines\n\n- **Objectif :** retrouver le sceau brisé\n- **Danger :** 3 gardiens spectraux\n\n---\n\n### Si les héros fouillent l’autel\n\nIls découvrent une clé d’obsidienne."
+              }
+              spellCheck
+            />
+            <footer className="scenario-editor-footer">
+              Markdown standard · fiches de rencontre détectées automatiquement
+            </footer>
+          </section>
+        )}
 
         <section className="scenario-preview-panel" aria-label="Aperçu du scénario">
           <article
