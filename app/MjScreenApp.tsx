@@ -1121,16 +1121,19 @@ function ScenarioWorkspace({
   scene,
   scenes,
   activeSceneId,
+  editorVisible,
   onSceneChange,
+  onEditorVisibleChange,
   onMarkdownChange,
 }: {
   scene: Scene | null;
   scenes: Scene[];
   activeSceneId: string;
+  editorVisible: boolean;
   onSceneChange: (sceneId: string) => void;
+  onEditorVisibleChange: (visible: boolean) => void;
   onMarkdownChange: (markdown: string) => void;
 }) {
-  const [editorVisible, setEditorVisible] = useState(true);
   const markdown = scene?.scenarioMarkdown ?? "";
   const wordCount = markdown.trim()
     ? markdown.trim().split(/\s+/u).length
@@ -1177,7 +1180,7 @@ function ScenarioWorkspace({
             className="scenario-view-toggle"
             aria-controls="scenario-editor-panel"
             aria-pressed={!editorVisible}
-            onClick={() => setEditorVisible((visible) => !visible)}
+            onClick={() => onEditorVisibleChange(!editorVisible)}
           >
             {editorVisible ? "Masquer l’éditeur" : "Afficher l’éditeur"}
           </button>
@@ -1259,6 +1262,7 @@ function ControllerView() {
   const [scenes, setScenes] = useState<Scene[]>([]);
   const [activeSceneId, setActiveSceneId] = useState("");
   const [mode, setMode] = useState<AppMode>("prepare");
+  const [scenarioEditorVisible, setScenarioEditorVisible] = useState(true);
   const [tool, setTool] = useState<MapTool>("rect");
   const [brushSize, setBrushSize] = useState(4);
   const [polygonDraft, setPolygonDraft] = useState<Point[]>([]);
@@ -1748,7 +1752,9 @@ function ControllerView() {
             scene={activeScene}
             scenes={scenes}
             activeSceneId={activeSceneId}
+            editorVisible={scenarioEditorVisible}
             onSceneChange={changeActiveScene}
+            onEditorVisibleChange={setScenarioEditorVisible}
             onMarkdownChange={(scenarioMarkdown) =>
               updateActiveScene((scene) => ({ ...scene, scenarioMarkdown }))
             }
