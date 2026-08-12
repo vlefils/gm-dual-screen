@@ -19,6 +19,12 @@ export type ScenarioSegment =
   | { kind: "markdown"; markdown: string }
   | { kind: "encounter"; markdown: string; sheet: EncounterSheetData };
 
+export type ScenarioOutlineItem = {
+  id: string;
+  level: number;
+  label: string;
+};
+
 const VITAL_LABELS = new Map([
   ["CA", "CA"],
   ["PV", "PV"],
@@ -42,6 +48,61 @@ function normalizedLabel(label: string): string {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/gu, "")
     .toUpperCase();
+}
+
+function cleanHeadingLabel(label: string): string {
+  return label
+    .replace(/!\[([^\]]*)\]\([^)]*\)/gu, "$1")
+    .replace(/\[([^\]]+)\]\([^)]*\)/gu, "$1")
+    .replace(/<[^>]+>/gu, "")
+    .replace(/[`*_~]/gu, "")
+    .replace(/\\([\\`*{}\[\]()#+.!_>-])/gu, "$1")
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
+function headingSlug(label: string): string {
+  return (
+    label
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/gu, "")
+      .toLocaleLowerCase("fr-FR")
+      .replace(/[’']/gu, "-")
+      .replace(/[^a-z0-9]+/gu, "-")
+      .replace(/^-+|-+$/gu, "") || "section"
+  );
+}
+
+export function getScenarioOutline(markdown: string): ScenarioOutlineItem[] {
+  const occurrences = new Map<string, number>();
+  const outline: ScenarioOutlineItem[] = [];
+  let fence: "`" | "~" | null = null;
+
+  for (const line of markdown.split(/\r\n|\r|\n/u)) {
+    const fenceMatch = /^\s*(`{3,}|~{3,})/u.exec(line);
+    if (fenceMatch) {
+      const marker = fenceMatch[1][0] as "`" | "~";
+      if (!fence) fence = marker;
+      else if (fence === marker) fence = null;
+      continue;
+    }
+    if (fence) continue;
+
+    const headingMatch = /^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$/u.exec(line);
+    if (!headingMatch) continue;
+    const label = cleanHeadingLabel(headingMatch[2]);
+    if (!label) continue;
+    const baseId = headingSlug(label);
+    const occurrence = (occurrences.get(baseId) ?? 0) + 1;
+    occurrences.set(baseId, occurrence);
+    outline.push({
+      id: occurrence === 1 ? baseId : `${baseId}-${occurrence}`,
+      level: headingMatch[1].length,
+      label,
+    });
+  }
+
+  return outline;
 }
 
 function parseField(line: string): EncounterField | null {

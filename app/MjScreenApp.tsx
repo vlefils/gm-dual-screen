@@ -60,8 +60,10 @@ import {
   setSetting,
 } from "./lib/storage";
 import {
+  getScenarioOutline,
   splitScenarioMarkdown,
   type EncounterSheetData,
+  type ScenarioOutlineItem,
 } from "./lib/scenario";
 
 type AppMode = "prepare" | "live" | "scenario";
@@ -1040,10 +1042,15 @@ function PlayerView() {
 function MarkdownContent({
   markdown,
   className = "scenario-markdown",
+  headings = [],
 }: {
   markdown: string;
   className?: string;
+  headings?: ScenarioOutlineItem[];
 }) {
+  let headingIndex = 0;
+  const nextHeadingId = () => headings[headingIndex++]?.id;
+
   return (
     <div className={className}>
       <ReactMarkdown
@@ -1055,6 +1062,72 @@ function MarkdownContent({
               <a {...props} target="_blank" rel="noreferrer noopener" />
             );
           },
+          h1: ({ node, ...props }) => {
+            void node;
+            return (
+              <h1
+                {...props}
+                id={nextHeadingId()}
+                data-scenario-anchor
+                tabIndex={-1}
+              />
+            );
+          },
+          h2: ({ node, ...props }) => {
+            void node;
+            return (
+              <h2
+                {...props}
+                id={nextHeadingId()}
+                data-scenario-anchor
+                tabIndex={-1}
+              />
+            );
+          },
+          h3: ({ node, ...props }) => {
+            void node;
+            return (
+              <h3
+                {...props}
+                id={nextHeadingId()}
+                data-scenario-anchor
+                tabIndex={-1}
+              />
+            );
+          },
+          h4: ({ node, ...props }) => {
+            void node;
+            return (
+              <h4
+                {...props}
+                id={nextHeadingId()}
+                data-scenario-anchor
+                tabIndex={-1}
+              />
+            );
+          },
+          h5: ({ node, ...props }) => {
+            void node;
+            return (
+              <h5
+                {...props}
+                id={nextHeadingId()}
+                data-scenario-anchor
+                tabIndex={-1}
+              />
+            );
+          },
+          h6: ({ node, ...props }) => {
+            void node;
+            return (
+              <h6
+                {...props}
+                id={nextHeadingId()}
+                data-scenario-anchor
+                tabIndex={-1}
+              />
+            );
+          },
         }}
       >
         {markdown}
@@ -1063,7 +1136,16 @@ function MarkdownContent({
   );
 }
 
-function EncounterSheet({ sheet }: { sheet: EncounterSheetData }) {
+function EncounterSheet({
+  sheet,
+  headings,
+}: {
+  sheet: EncounterSheetData;
+  headings: ScenarioOutlineItem[];
+}) {
+  const EncounterTitle = sheet.headingLevel === 2 ? "h2" : "h1";
+  const titleHeading = headings[0];
+
   return (
     <article
       className={`encounter-sheet encounter-level-${sheet.headingLevel}`}
@@ -1073,7 +1155,13 @@ function EncounterSheet({ sheet }: { sheet: EncounterSheetData }) {
         <div className="encounter-heading-row">
           <div>
             <span className="encounter-kicker">Encounter détecté</span>
-            <h1>{sheet.title}</h1>
+            <EncounterTitle
+              id={titleHeading?.id}
+              data-scenario-anchor
+              tabIndex={-1}
+            >
+              {sheet.title}
+            </EncounterTitle>
           </div>
           {sheet.challengeRating && (
             <span className="encounter-rating">{sheet.challengeRating}</span>
@@ -1124,6 +1212,7 @@ function EncounterSheet({ sheet }: { sheet: EncounterSheetData }) {
         <MarkdownContent
           markdown={sheet.bodyMarkdown}
           className="encounter-body scenario-markdown"
+          headings={headings.slice(1)}
         />
       )}
     </article>
@@ -1135,8 +1224,10 @@ function ScenarioWorkspace({
   scenes,
   activeSceneId,
   editorVisible,
+  outlineVisible,
   onSceneChange,
   onEditorVisibleChange,
+  onOutlineVisibleChange,
   onMarkdownChange,
   onThemeChange,
 }: {
@@ -1144,8 +1235,10 @@ function ScenarioWorkspace({
   scenes: Scene[];
   activeSceneId: string;
   editorVisible: boolean;
+  outlineVisible: boolean;
   onSceneChange: (sceneId: string) => void;
   onEditorVisibleChange: (visible: boolean) => void;
+  onOutlineVisibleChange: (visible: boolean) => void;
   onMarkdownChange: (markdown: string) => void;
   onThemeChange: (theme: ScenarioTheme) => void;
 }) {
@@ -1159,9 +1252,77 @@ function ScenarioWorkspace({
     () => splitScenarioMarkdown(markdown),
     [markdown],
   );
+  const scenarioOutline = useMemo(
+    () => getScenarioOutline(markdown),
+    [markdown],
+  );
+  const renderedSegments = useMemo(() => {
+    let headingCursor = 0;
+    return scenarioSegments.map((segment) => {
+      const headingCount = getScenarioOutline(segment.markdown).length;
+      const headings = scenarioOutline.slice(
+        headingCursor,
+        headingCursor + headingCount,
+      );
+      headingCursor += headingCount;
+      return { segment, headings };
+    });
+  }, [scenarioOutline, scenarioSegments]);
   const encounterCount = scenarioSegments.filter(
     (segment) => segment.kind === "encounter",
   ).length;
+  const previewPanelRef = useRef<HTMLElement | null>(null);
+  const [activeHeadingId, setActiveHeadingId] = useState(
+    scenarioOutline[0]?.id ?? "",
+  );
+
+  useEffect(() => {
+    const previewPanel = previewPanelRef.current;
+    if (!previewPanel || scenarioOutline.length === 0) {
+      setActiveHeadingId("");
+      return;
+    }
+
+    let frame = 0;
+    const updateActiveHeading = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        const threshold = previewPanel.getBoundingClientRect().top + 96;
+        let nextActive = scenarioOutline[0].id;
+        for (const item of scenarioOutline) {
+          const heading = document.getElementById(item.id);
+          if (!heading || !previewPanel.contains(heading)) continue;
+          if (heading.getBoundingClientRect().top <= threshold) {
+            nextActive = item.id;
+          } else {
+            break;
+          }
+        }
+        setActiveHeadingId((current) =>
+          current === nextActive ? current : nextActive,
+        );
+      });
+    };
+
+    updateActiveHeading();
+    previewPanel.addEventListener("scroll", updateActiveHeading, {
+      passive: true,
+    });
+    return () => {
+      window.cancelAnimationFrame(frame);
+      previewPanel.removeEventListener("scroll", updateActiveHeading);
+    };
+  }, [scenarioOutline]);
+
+  const navigateToHeading = (headingId: string) => {
+    const target = document.getElementById(headingId);
+    const previewPanel = previewPanelRef.current;
+    if (!target || !previewPanel?.contains(target)) return;
+    setActiveHeadingId(headingId);
+    target.focus({ preventScroll: true });
+    target.scrollIntoView({ behavior: "smooth", block: "start" });
+    window.history.replaceState(null, "", `#${headingId}`);
+  };
 
   return (
     <section
@@ -1216,21 +1377,38 @@ function ScenarioWorkspace({
               ))}
             </select>
           </label>
-          <button
-            type="button"
-            className="scenario-view-toggle"
-            aria-controls="scenario-editor-panel"
-            aria-pressed={!editorVisible}
-            onClick={() => onEditorVisibleChange(!editorVisible)}
-          >
-            {editorVisible ? "Masquer l’éditeur" : "Afficher l’éditeur"}
-          </button>
         </div>
       </header>
 
-      <div className={`scenario-split ${editorVisible ? "" : "is-reading"}`}>
+      <div
+        className={`scenario-split ${editorVisible ? "has-editor" : ""} ${outlineVisible ? "has-outline" : ""} ${!editorVisible && !outlineVisible ? "is-focus" : ""}`}
+      >
+        {!editorVisible && (
+          <button
+            type="button"
+            className="scenario-panel-toggle is-left is-collapsed"
+            aria-label="Afficher l’éditeur Markdown"
+            aria-controls="scenario-editor-panel"
+            aria-expanded="false"
+            title="Afficher l’éditeur"
+            onClick={() => onEditorVisibleChange(true)}
+          >
+            ›
+          </button>
+        )}
         {editorVisible && (
           <section className="scenario-editor-panel" id="scenario-editor-panel">
+            <button
+              type="button"
+              className="scenario-panel-toggle is-left"
+              aria-label="Masquer l’éditeur Markdown"
+              aria-controls="scenario-editor-panel"
+              aria-expanded="true"
+              title="Masquer l’éditeur"
+              onClick={() => onEditorVisibleChange(false)}
+            >
+              ‹
+            </button>
             <div className="scenario-panel-heading">
               <div>
                 <span className="section-eyebrow">MANUSCRIT</span>
@@ -1256,7 +1434,12 @@ function ScenarioWorkspace({
           </section>
         )}
 
-        <section className="scenario-preview-panel" aria-label="Aperçu du scénario">
+        <section
+          ref={previewPanelRef}
+          className="scenario-preview-panel"
+          id="scenario-preview-panel"
+          aria-label="Aperçu du scénario"
+        >
           <article
             className={`scenario-page ${encounterCount ? "has-encounter" : ""}`}
           >
@@ -1271,13 +1454,18 @@ function ScenarioWorkspace({
             </header>
             {markdown.trim() ? (
               <div className="scenario-document">
-                {scenarioSegments.map((segment, index) =>
+                {renderedSegments.map(({ segment, headings }, index) =>
                   segment.kind === "encounter" ? (
-                    <EncounterSheet key={`encounter-${index}`} sheet={segment.sheet} />
+                    <EncounterSheet
+                      key={`encounter-${index}`}
+                      sheet={segment.sheet}
+                      headings={headings}
+                    />
                   ) : (
                     <MarkdownContent
                       key={`markdown-${index}`}
                       markdown={segment.markdown}
+                      headings={headings}
                     />
                   ),
                 )}
@@ -1294,6 +1482,72 @@ function ScenarioWorkspace({
             )}
           </article>
         </section>
+
+        {outlineVisible ? (
+          <aside className="scenario-outline-panel" id="scenario-outline-panel">
+            <button
+              type="button"
+              className="scenario-panel-toggle is-right"
+              aria-label="Masquer le plan du scénario"
+              aria-controls="scenario-outline-panel"
+              aria-expanded="true"
+              title="Masquer le plan"
+              onClick={() => onOutlineVisibleChange(false)}
+            >
+              ›
+            </button>
+            <div className="scenario-outline-heading">
+              <div>
+                <span className="section-eyebrow">NAVIGATION</span>
+                <h2>Plan du scénario</h2>
+              </div>
+              <span className="scenario-outline-count">
+                {scenarioOutline.length}
+              </span>
+            </div>
+            {scenarioOutline.length ? (
+              <nav className="scenario-outline-nav" aria-label="Plan du Markdown">
+                <ol>
+                  {scenarioOutline.map((item) => (
+                    <li
+                      key={item.id}
+                      className={`scenario-outline-level-${Math.min(item.level, 4)}`}
+                    >
+                      <a
+                        href={`#${item.id}`}
+                        aria-current={
+                          activeHeadingId === item.id ? "location" : undefined
+                        }
+                        onClick={(event) => {
+                          event.preventDefault();
+                          navigateToHeading(item.id);
+                        }}
+                      >
+                        <span>{item.label}</span>
+                      </a>
+                    </li>
+                  ))}
+                </ol>
+              </nav>
+            ) : (
+              <p className="scenario-outline-empty">
+                Ajoutez des titres avec # pour construire le plan.
+              </p>
+            )}
+          </aside>
+        ) : (
+          <button
+            type="button"
+            className="scenario-panel-toggle is-right is-collapsed"
+            aria-label="Afficher le plan du scénario"
+            aria-controls="scenario-outline-panel"
+            aria-expanded="false"
+            title="Afficher le plan"
+            onClick={() => onOutlineVisibleChange(true)}
+          >
+            ‹
+          </button>
+        )}
       </div>
     </section>
   );
@@ -1304,6 +1558,7 @@ function ControllerView() {
   const [activeSceneId, setActiveSceneId] = useState("");
   const [mode, setMode] = useState<AppMode>("prepare");
   const [scenarioEditorVisible, setScenarioEditorVisible] = useState(true);
+  const [scenarioOutlineVisible, setScenarioOutlineVisible] = useState(true);
   const [tool, setTool] = useState<MapTool>("rect");
   const [brushSize, setBrushSize] = useState(4);
   const [polygonDraft, setPolygonDraft] = useState<Point[]>([]);
@@ -1794,8 +2049,10 @@ function ControllerView() {
             scenes={scenes}
             activeSceneId={activeSceneId}
             editorVisible={scenarioEditorVisible}
+            outlineVisible={scenarioOutlineVisible}
             onSceneChange={changeActiveScene}
             onEditorVisibleChange={setScenarioEditorVisible}
+            onOutlineVisibleChange={setScenarioOutlineVisible}
             onMarkdownChange={(scenarioMarkdown) =>
               updateActiveScene((scene) => ({ ...scene, scenarioMarkdown }))
             }

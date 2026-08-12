@@ -1,10 +1,36 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  getScenarioOutline,
   isEncounterMarkdown,
   parseEncounterMarkdown,
   splitScenarioMarkdown,
 } from "../app/lib/scenario.ts";
+
+test("le plan du scénario crée des ancres stables et uniques", () => {
+  const outline = getScenarioOutline(`# Le Hub
+
+## [Entrée](https://example.com) dans les ruines
+
+### Actions
+
+\`\`\`
+## Titre dans du code
+\`\`\`
+
+### Actions`);
+
+  assert.deepEqual(outline, [
+    { id: "le-hub", level: 1, label: "Le Hub" },
+    {
+      id: "entree-dans-les-ruines",
+      level: 2,
+      label: "Entrée dans les ruines",
+    },
+    { id: "actions", level: 3, label: "Actions" },
+    { id: "actions-2", level: 3, label: "Actions" },
+  ]);
+});
 
 const rexSheet = `# Rex Calder
 
