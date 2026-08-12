@@ -2,12 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   DEFAULT_PANEL_WIDTH,
+  DEFAULT_SCENARIO_THEME,
   clampPanelWidth,
   collectAssetIds,
   createScene,
   findZoneAtPoint,
   getImageViewport,
   isPointInZone,
+  isScenarioTheme,
   isUsableRect,
   mergePolygonBoundaries,
   mergePolygonDraftBoundaries,
@@ -23,8 +25,15 @@ test("une scène démarre avec un brouillard intact et un panneau à 25 %", () =
   assert.deepEqual(scene.strokes, []);
   assert.equal(scene.outsideRevealed, false);
   assert.equal(scene.scenarioMarkdown, "");
+  assert.equal(scene.scenarioTheme, DEFAULT_SCENARIO_THEME);
   assert.deepEqual(scene.viewport, { zoom: 1, x: 0, y: 0 });
   assert.deepEqual(scene.imageViewports, {});
+});
+
+test("seules les palettes de scénario prises en charge sont acceptées", () => {
+  assert.equal(isScenarioTheme("cyberpunk"), true);
+  assert.equal(isScenarioTheme("occult"), true);
+  assert.equal(isScenarioTheme("fluo-inconnu"), false);
 });
 
 test("chaque illustration conserve un cadrage indépendant et borné", () => {

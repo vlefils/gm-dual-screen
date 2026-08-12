@@ -1,6 +1,8 @@
 import {
+  DEFAULT_SCENARIO_THEME,
   collectAssetIds,
   createId,
+  isScenarioTheme,
   type AssetRecord,
   type Scene,
 } from "./model.ts";
@@ -75,6 +77,9 @@ export async function getScenes(): Promise<Scene[]> {
       ...scene,
       scenarioMarkdown:
         typeof scene.scenarioMarkdown === "string" ? scene.scenarioMarkdown : "",
+      scenarioTheme: isScenarioTheme(scene.scenarioTheme)
+        ? scene.scenarioTheme
+        : DEFAULT_SCENARIO_THEME,
       imageViewports:
         scene.imageViewports && typeof scene.imageViewports === "object"
           ? scene.imageViewports
@@ -318,6 +323,9 @@ export async function importBackup(
         typeof original.scenarioMarkdown === "string"
           ? original.scenarioMarkdown
           : "",
+      scenarioTheme: isScenarioTheme(original.scenarioTheme)
+        ? original.scenarioTheme
+        : DEFAULT_SCENARIO_THEME,
       mapAssetId: original.mapAssetId
         ? (assetIdMap.get(original.mapAssetId) ?? null)
         : null,

@@ -1,6 +1,17 @@
 export const PANEL_WIDTH_MIN = 0;
 export const PANEL_WIDTH_MAX = 100;
 export const DEFAULT_PANEL_WIDTH = 25;
+export const SCENARIO_THEMES = [
+  "medieval",
+  "cyberpunk",
+  "dark",
+  "light",
+  "gritty",
+  "occult",
+] as const;
+export const DEFAULT_SCENARIO_THEME = "medieval";
+
+export type ScenarioTheme = (typeof SCENARIO_THEMES)[number];
 
 export type Point = {
   x: number;
@@ -33,6 +44,7 @@ export type Scene = {
   id: string;
   name: string;
   scenarioMarkdown: string;
+  scenarioTheme: ScenarioTheme;
   mapAssetId: string | null;
   galleryAssetIds: string[];
   activeImageId: string | null;
@@ -87,6 +99,7 @@ export function createScene(index = 1): Scene {
     id: createId("scene"),
     name: `Scène ${index}`,
     scenarioMarkdown: "",
+    scenarioTheme: DEFAULT_SCENARIO_THEME,
     mapAssetId: null,
     galleryAssetIds: [],
     activeImageId: null,
@@ -108,6 +121,10 @@ export function cloneScene(scene: Scene, name: string): Scene {
     name,
     updatedAt: new Date().toISOString(),
   };
+}
+
+export function isScenarioTheme(value: unknown): value is ScenarioTheme {
+  return SCENARIO_THEMES.includes(value as ScenarioTheme);
 }
 
 export function clamp(value: number, min: number, max: number): number {

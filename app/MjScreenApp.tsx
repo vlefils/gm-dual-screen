@@ -19,6 +19,7 @@ import {
   type ProtocolMessage,
 } from "./lib/protocol";
 import {
+  DEFAULT_SCENARIO_THEME,
   DEFAULT_PANEL_WIDTH,
   PANEL_WIDTH_MAX,
   PANEL_WIDTH_MIN,
@@ -44,6 +45,7 @@ import {
   type RevealStroke,
   type RevealZone,
   type Scene,
+  type ScenarioTheme,
   type ZoneKind,
 } from "./lib/model";
 import {
@@ -69,6 +71,17 @@ type Notice = { tone: "success" | "error"; text: string } | null;
 const ACTIVE_SCENE_KEY = "activeSceneId";
 const POLYGON_DRAFT_COLOR = "#58d6ff";
 const OUTSIDE_ZONE_TARGET = "__outside-zones__";
+const SCENARIO_THEME_OPTIONS: Array<{
+  value: ScenarioTheme;
+  label: string;
+}> = [
+  { value: "medieval", label: "Médiéval" },
+  { value: "cyberpunk", label: "Cyberpunk" },
+  { value: "dark", label: "Sombre" },
+  { value: "light", label: "Clair" },
+  { value: "gritty", label: "Gritty" },
+  { value: "occult", label: "Occulte" },
+];
 
 function formatError(error: unknown): string {
   if (
@@ -1125,6 +1138,7 @@ function ScenarioWorkspace({
   onSceneChange,
   onEditorVisibleChange,
   onMarkdownChange,
+  onThemeChange,
 }: {
   scene: Scene | null;
   scenes: Scene[];
@@ -1133,8 +1147,10 @@ function ScenarioWorkspace({
   onSceneChange: (sceneId: string) => void;
   onEditorVisibleChange: (visible: boolean) => void;
   onMarkdownChange: (markdown: string) => void;
+  onThemeChange: (theme: ScenarioTheme) => void;
 }) {
   const markdown = scene?.scenarioMarkdown ?? "";
+  const theme = scene?.scenarioTheme ?? DEFAULT_SCENARIO_THEME;
   const wordCount = markdown.trim()
     ? markdown.trim().split(/\s+/u).length
     : 0;
@@ -1148,7 +1164,11 @@ function ScenarioWorkspace({
   ).length;
 
   return (
-    <section className="scenario-workspace" aria-label="Scénario de la scène">
+    <section
+      className="scenario-workspace"
+      data-scenario-theme={theme}
+      aria-label="Scénario de la scène"
+    >
       <header className="scenario-toolbar">
         <div className="scenario-scene-picker">
           <label htmlFor="scenario-scene">Scénario de</label>
@@ -1175,6 +1195,27 @@ function ScenarioWorkspace({
             </span>
             <span className="scenario-saved">Enregistrement automatique</span>
           </div>
+          <label className="scenario-theme-picker">
+            <span className="scenario-theme-swatches" aria-hidden="true">
+              <i />
+              <i />
+              <i />
+              <i />
+            </span>
+            <span>Thème</span>
+            <select
+              value={theme}
+              onChange={(event) =>
+                onThemeChange(event.target.value as ScenarioTheme)
+              }
+            >
+              {SCENARIO_THEME_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
           <button
             type="button"
             className="scenario-view-toggle"
@@ -1757,6 +1798,9 @@ function ControllerView() {
             onEditorVisibleChange={setScenarioEditorVisible}
             onMarkdownChange={(scenarioMarkdown) =>
               updateActiveScene((scene) => ({ ...scene, scenarioMarkdown }))
+            }
+            onThemeChange={(scenarioTheme) =>
+              updateActiveScene((scene) => ({ ...scene, scenarioTheme }))
             }
           />
         ) : (
