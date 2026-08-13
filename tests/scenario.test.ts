@@ -85,6 +85,14 @@ Rex ne peut pas être surpris tant qu’il est conscient.
 
 **Attaques multiples.** Rex effectue deux attaques.`;
 
+const inlineAbilitiesSheet = `## Dario Senn — FP 2
+
+**CA** 15
+**PV** 42
+**Vitesse** 9 m
+
+**FOR** 11 (+0) — **DEX** 16 (+3) — **CON** 14 (+2) — **ESPRIT** 15 (+2) — **CHA** 15 (+2)`;
+
 test("une fiche d’encounter structurée est détectée", () => {
   assert.equal(isEncounterMarkdown(rexSheet), true);
   assert.equal(isEncounterMarkdown("# Jouer Rex en combat\n\nRex protège le groupe."), false);
@@ -121,6 +129,20 @@ test("une fiche compacte ouverte par ## adapte sa hiérarchie", () => {
   assert.equal(sheet.challengeRating, "FP 4");
   assert.equal(sheet.details[0].label, "Bonus de maîtrise");
   assert.match(sheet.bodyMarkdown, /^### Vieux de la vieille/u);
+});
+
+test("les caractéristiques regroupées sur une ligne sont séparées", () => {
+  assert.equal(isEncounterMarkdown(inlineAbilitiesSheet), true);
+  const sheet = parseEncounterMarkdown(inlineAbilitiesSheet);
+  assert.equal(sheet.title, "Dario Senn");
+  assert.equal(sheet.challengeRating, "FP 2");
+  assert.deepEqual(sheet.abilities, [
+    { label: "FOR", value: "11 (+0)" },
+    { label: "DEX", value: "16 (+3)" },
+    { label: "CON", value: "14 (+2)" },
+    { label: "ESPRIT", value: "15 (+2)" },
+    { label: "CHA", value: "15 (+2)" },
+  ]);
 });
 
 test("une fiche ## peut vivre au milieu d’un chapitre normal", () => {

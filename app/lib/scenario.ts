@@ -111,6 +111,27 @@ function parseField(line: string): EncounterField | null {
   return { label: match[1].trim(), value: match[2].trim() };
 }
 
+function isPrimaryStatField(field: EncounterField): boolean {
+  const label = normalizedLabel(field.label);
+  return VITAL_LABELS.has(label) || ABILITY_LABELS.has(label);
+}
+
+function parseFields(line: string): EncounterField[] {
+  const segments = line.split(/\s+[—–-]\s+(?=\*\*)/u);
+  if (segments.length > 1) {
+    const fields = segments.map(parseField);
+    if (
+      fields.every((field): field is EncounterField => Boolean(field)) &&
+      fields.every(isPrimaryStatField)
+    ) {
+      return fields;
+    }
+  }
+
+  const field = parseField(line);
+  return field ? [field] : [];
+}
+
 function introMarkdown(markdown: string): string {
   const lines = markdown.split(/\r\n|\r|\n/u);
   for (let index = 1; index < lines.length; index += 1) {
@@ -125,8 +146,7 @@ export function isEncounterMarkdown(markdown: string): boolean {
   const intro = introMarkdown(markdown);
   const fields = intro
     .split(/\r\n|\r|\n/u)
-    .map(parseField)
-    .filter((field): field is EncounterField => Boolean(field));
+    .flatMap(parseFields);
   const labels = fields.map((field) => normalizedLabel(field.label));
   const vitalCount = labels.filter((label) => VITAL_LABELS.has(label)).length;
   const abilityCount = labels.filter((label) => ABILITY_LABELS.has(label)).length;
@@ -137,8 +157,7 @@ export function isEncounterMarkdown(markdown: string): boolean {
 function findBodyStart(lines: string[]): { introEnd: number; bodyStart: number } {
   let foundEncounterField = false;
   for (let index = 1; index < lines.length; index += 1) {
-    const field = parseField(lines[index]);
-    if (field) {
+    for (const field of parseFields(lines[index])) {
       const label = normalizedLabel(field.label);
       if (VITAL_LABELS.has(label) || ABILITY_LABELS.has(label)) {
         foundEncounterField = true;
@@ -183,19 +202,21 @@ export function parseEncounterMarkdown(markdown: string): EncounterSheetData {
 
   for (let index = cursor; index < introEnd; index += 1) {
     const line = lines[index];
-    const field = parseField(line);
-    if (!field) {
+    const fields = parseFields(line);
+    if (fields.length === 0) {
       descriptionLines.push(line);
       continue;
     }
-    const label = normalizedLabel(field.label);
-    const vitalLabel = VITAL_LABELS.get(label);
-    if (vitalLabel) {
-      vitals.push({ ...field, label: vitalLabel });
-    } else if (ABILITY_LABELS.has(label)) {
-      abilities.push({ ...field, label });
-    } else {
-      details.push(field);
+    for (const field of fields) {
+      const label = normalizedLabel(field.label);
+      const vitalLabel = VITAL_LABELS.get(label);
+      if (vitalLabel) {
+        vitals.push({ ...field, label: vitalLabel });
+      } else if (ABILITY_LABELS.has(label)) {
+        abilities.push({ ...field, label });
+      } else {
+        details.push(field);
+      }
     }
   }
 
