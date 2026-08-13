@@ -22,6 +22,21 @@ type BackupAsset = Omit<AssetRecord, "blob"> & {
   data: string;
 };
 
+const SUPPORTED_IMAGE_TYPES = new Map([
+  ["image/jpeg", "image/jpeg"],
+  ["image/jpg", "image/jpeg"],
+  ["image/pjpeg", "image/jpeg"],
+  ["image/png", "image/png"],
+  ["image/webp", "image/webp"],
+]);
+
+const IMAGE_TYPES_BY_EXTENSION = new Map([
+  ["jpg", "image/jpeg"],
+  ["jpeg", "image/jpeg"],
+  ["png", "image/png"],
+  ["webp", "image/webp"],
+]);
+
 export type BackupManifest = {
   format: "ecran-du-mj";
   version: 1;
@@ -145,11 +160,23 @@ export async function setSetting(key: string, value: string): Promise<void> {
   database.close();
 }
 
+export function getSupportedImageType(
+  file: Pick<File, "name" | "type">,
+): string | null {
+  const declaredType = file.type.toLowerCase().split(";", 1)[0].trim();
+  const supportedType = SUPPORTED_IMAGE_TYPES.get(declaredType);
+  if (supportedType) return supportedType;
+
+  if (declaredType && declaredType !== "application/octet-stream") return null;
+
+  const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
+  return IMAGE_TYPES_BY_EXTENSION.get(extension) ?? null;
+}
+
 export async function validateImage(
   file: File,
 ): Promise<{ width: number; height: number }> {
-  const allowedTypes = new Set(["image/png", "image/jpeg", "image/webp"]);
-  if (!allowedTypes.has(file.type)) {
+  if (!getSupportedImageType(file)) {
     throw new Error("Format non pris en charge. Utilisez PNG, JPEG ou WebP.");
   }
   if (file.size > 30 * 1024 * 1024) {
@@ -181,11 +208,15 @@ export async function validateImage(
 
 export async function saveImageFile(file: File): Promise<AssetRecord> {
   const dimensions = await validateImage(file);
+  const type = getSupportedImageType(file);
+  if (!type) {
+    throw new Error("Format non pris en charge. Utilisez PNG, JPEG ou WebP.");
+  }
   const asset: AssetRecord = {
     id: createId("asset"),
     name: file.name,
-    type: file.type,
-    blob: file,
+    type,
+    blob: file.type === type ? file : new Blob([file], { type }),
     width: dimensions.width,
     height: dimensions.height,
     createdAt: new Date().toISOString(),

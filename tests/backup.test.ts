@@ -1,6 +1,38 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseBackupManifest } from "../app/lib/storage.ts";
+import {
+  getSupportedImageType,
+  parseBackupManifest,
+} from "../app/lib/storage.ts";
+
+test("les types d’image usuels sont normalisés", () => {
+  assert.equal(
+    getSupportedImageType({ name: "portrait.JPG", type: "image/jpg" }),
+    "image/jpeg",
+  );
+  assert.equal(
+    getSupportedImageType({ name: "carte.png", type: "image/png" }),
+    "image/png",
+  );
+});
+
+test("l’extension prend le relais quand le navigateur omet le type", () => {
+  assert.equal(
+    getSupportedImageType({ name: "carte.JPEG", type: "" }),
+    "image/jpeg",
+  );
+  assert.equal(
+    getSupportedImageType({
+      name: "illustration.webp",
+      type: "application/octet-stream",
+    }),
+    "image/webp",
+  );
+  assert.equal(
+    getSupportedImageType({ name: "illustration.gif", type: "" }),
+    null,
+  );
+});
 
 test("une sauvegarde v1 valide est reconnue", () => {
   const manifest = parseBackupManifest(

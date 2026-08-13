@@ -1569,13 +1569,14 @@ input[type="range"] {
   grid-column: 1 / -1;
 }
 
-.button-label input,
-.upload-button input {
+.file-picker-input {
   position: absolute;
   width: 1px;
   height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
   opacity: 0;
-  pointer-events: none;
 }
 
 .danger-button {
@@ -1583,6 +1584,7 @@ input[type="range"] {
 }
 
 .upload-button {
+  width: 100%;
   display: grid;
   min-height: 39px;
   place-items: center;
@@ -1595,8 +1597,9 @@ input[type="range"] {
   cursor: pointer;
 }
 
-.upload-button:hover {
+.upload-button:hover:not(:disabled) {
   border-color: var(--accent);
+  background: #0f1216;
   color: var(--accent-bright);
 }
 

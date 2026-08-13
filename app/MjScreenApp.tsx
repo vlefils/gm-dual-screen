@@ -70,6 +70,14 @@ type AppMode = "prepare" | "live" | "scenario";
 type MapTool = "pan" | "rect" | "polygon" | "vertices" | "erase";
 type Notice = { tone: "success" | "error"; text: string } | null;
 
+type FilePickerButtonProps = {
+  accept: string;
+  children: React.ReactNode;
+  className: string;
+  multiple?: boolean;
+  onChange: (event: ChangeEvent<HTMLInputElement>) => void;
+};
+
 const ACTIVE_SCENE_KEY = "activeSceneId";
 const POLYGON_DRAFT_COLOR = "#58d6ff";
 const OUTSIDE_ZONE_TARGET = "__outside-zones__";
@@ -110,6 +118,38 @@ function downloadBlob(blob: Blob, filename: string): void {
   anchor.download = filename;
   anchor.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function FilePickerButton({
+  accept,
+  children,
+  className,
+  multiple = false,
+  onChange,
+}: FilePickerButtonProps) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  return (
+    <>
+      <input
+        ref={inputRef}
+        className="file-picker-input"
+        type="file"
+        accept={accept}
+        multiple={multiple}
+        tabIndex={-1}
+        aria-hidden="true"
+        onChange={onChange}
+      />
+      <button
+        type="button"
+        className={className}
+        onClick={() => inputRef.current?.click()}
+      >
+        {children}
+      </button>
+    </>
+  );
 }
 
 function useSceneAssetUrls(scene: Scene | null): Map<string, string> {
@@ -2133,14 +2173,13 @@ function ControllerView() {
                     <h3>Carte</h3>
                     <span>PNG, JPEG ou WebP</span>
                   </div>
-                  <label className="upload-button">
-                    <input
-                      type="file"
-                      accept="image/png,image/jpeg,image/webp"
-                      onChange={(event) => void importMap(event)}
-                    />
+                  <FilePickerButton
+                    className="upload-button"
+                    accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
+                    onChange={(event) => void importMap(event)}
+                  >
                     {activeScene?.mapAssetId ? "Remplacer la carte" : "Importer une carte"}
-                  </label>
+                  </FilePickerButton>
                 </section>
 
                 <section className="control-section">
@@ -2272,15 +2311,14 @@ function ControllerView() {
                     <h3>Galerie</h3>
                     <span>{activeScene?.galleryAssetIds.length ?? 0} image(s)</span>
                   </div>
-                  <label className="upload-button">
-                    <input
-                      type="file"
-                      multiple
-                      accept="image/png,image/jpeg,image/webp"
-                      onChange={(event) => void importGallery(event)}
-                    />
+                  <FilePickerButton
+                    className="upload-button"
+                    multiple
+                    accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
+                    onChange={(event) => void importGallery(event)}
+                  >
                     Ajouter des illustrations
-                  </label>
+                  </FilePickerButton>
                   <GalleryGrid
                     scene={activeScene}
                     assetUrls={assetUrls}
@@ -2320,14 +2358,13 @@ function ControllerView() {
                     <button type="button" onClick={() => void exportAll()}>
                       Exporter tout
                     </button>
-                    <label className="button-label">
-                      <input
-                        type="file"
-                        accept=".mjscreen,application/json"
-                        onChange={(event) => void importAll(event)}
-                      />
+                    <FilePickerButton
+                      className="button-label"
+                      accept=".mjscreen,application/json"
+                      onChange={(event) => void importAll(event)}
+                    >
                       Importer
-                    </label>
+                    </FilePickerButton>
                   </div>
                 </section>
               </>
