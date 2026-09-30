@@ -93,6 +93,35 @@ const inlineAbilitiesSheet = `## Dario Senn — FP 2
 
 **FOR** 11 (+0) — **DEX** 16 (+3) — **CON** 14 (+2) — **ESPRIT** 15 (+2) — **CHA** 15 (+2)`;
 
+const appendixSheetFormat = `## Annexe B — Fiches rapides
+
+Ces valeurs sont prévues pour un plan en cases de 1,5 m.
+
+### Agent Vescari ou agent Polk — FP 1/2 · 100 PX
+
+*Humanoïde moyen · CA 14 (costume blindé) · PV 22 (4d8 + 4) · vitesse 9 m*
+
+**FOR** 12 (+1) · **DEX** 14 (+2) · **CON** 12 (+1) · **INT** 10 (+0) · **SAG** 12 (+1) · **CHA** 10 (+0)
+**Compétences :** Perception +3, Intimidation +2 ; **sens :** Perception passive 13.
+
+**Tactique :** garde une sortie et agit avec un collègue.
+
+**Action — Matraque à impulsion.** Attaque au corps à corps : +4.
+
+### Shadow — aucune rencontre de combat · FP 0
+
+*Petite bête implantée · CA 14 · PV 6 · vitesse 12 m, escalade 9 m*
+
+**FOR** 3 (−4) · **DEX** 18 (+4) · **CON** 10 (+0) · **INT** 3 (−4) · **SAG** 14 (+2) · **CHA** 10 (+0) ; **Discrétion +6**, Perception passive 14.
+
+**Camouflage optique.** Shadow devient difficile à distinguer.
+
+Il n’attaque pas les PJ.
+
+### Jonah Vale et Celeste Wren
+
+Jonah n’est normalement pas un adversaire.`;
+
 test("une fiche d’encounter structurée est détectée", () => {
   assert.equal(isEncounterMarkdown(rexSheet), true);
   assert.equal(isEncounterMarkdown("# Jouer Rex en combat\n\nRex protège le groupe."), false);
@@ -153,4 +182,41 @@ test("une fiche ## peut vivre au milieu d’un chapitre normal", () => {
     segments.map((segment) => segment.kind),
     ["markdown", "encounter", "markdown"],
   );
+});
+
+test("les fiches rapides de niveau ### séparées par des points médians sont détectées", () => {
+  const segments = splitScenarioMarkdown(appendixSheetFormat);
+  assert.deepEqual(
+    segments.map((segment) => segment.kind),
+    ["markdown", "encounter", "encounter", "markdown"],
+  );
+
+  const agent = segments[1];
+  assert.equal(agent.kind, "encounter");
+  if (agent.kind !== "encounter") return;
+  assert.equal(agent.sheet.headingLevel, 3);
+  assert.equal(agent.sheet.title, "Agent Vescari ou agent Polk");
+  assert.equal(agent.sheet.challengeRating, "FP 1/2");
+  assert.equal(agent.sheet.subtitle, "Humanoïde moyen");
+  assert.deepEqual(agent.sheet.vitals, [
+    { label: "CA", value: "14 (costume blindé)" },
+    { label: "PV", value: "22 (4d8 + 4)" },
+    { label: "Vitesse", value: "9 m" },
+  ]);
+  assert.equal(agent.sheet.abilities.length, 6);
+  assert.deepEqual(agent.sheet.details, [
+    { label: "Compétences :", value: "Perception +3, Intimidation +2" },
+    { label: "sens :", value: "Perception passive 13." },
+  ]);
+  assert.match(agent.sheet.bodyMarkdown, /^\*\*Tactique :\*\*/u);
+
+  const shadow = segments[2];
+  assert.equal(shadow.kind, "encounter");
+  if (shadow.kind !== "encounter") return;
+  assert.equal(shadow.sheet.title, "Shadow — aucune rencontre de combat");
+  assert.equal(shadow.sheet.abilities.length, 6);
+  assert.deepEqual(shadow.sheet.details, [
+    { label: "Discrétion", value: "+6, Perception passive 14." },
+  ]);
+  assert.match(shadow.sheet.bodyMarkdown, /^\*\*Camouflage optique\./u);
 });

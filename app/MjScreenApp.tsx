@@ -1183,7 +1183,8 @@ function EncounterSheet({
   sheet: EncounterSheetData;
   headings: ScenarioOutlineItem[];
 }) {
-  const EncounterTitle = sheet.headingLevel === 2 ? "h2" : "h1";
+  const EncounterTitle =
+    sheet.headingLevel === 3 ? "h3" : sheet.headingLevel === 2 ? "h2" : "h1";
   const titleHeading = headings[0];
 
   return (

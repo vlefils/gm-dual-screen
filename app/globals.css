@@ -962,7 +962,8 @@ input[type="range"] {
 }
 
 .encounter-header h1,
-.encounter-header h2 {
+.encounter-header h2,
+.encounter-header h3 {
   margin: 0;
   color: inherit;
   font-family: var(--scenario-font-heading);

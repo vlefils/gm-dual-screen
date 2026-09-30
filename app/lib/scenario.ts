@@ -4,7 +4,7 @@ export type EncounterField = {
 };
 
 export type EncounterSheetData = {
-  headingLevel: 1 | 2;
+  headingLevel: 1 | 2 | 3;
   title: string;
   subtitle: string | null;
   challengeRating: string | null;
@@ -107,29 +107,60 @@ export function getScenarioOutline(markdown: string): ScenarioOutlineItem[] {
 
 function parseField(line: string): EncounterField | null {
   const match = /^\s*(?:[-+*]\s+)?\*\*([^*]+)\*\*\s+(.+?)\s*$/u.exec(line);
-  if (!match) return null;
-  return { label: match[1].trim(), value: match[2].trim() };
-}
+  if (match) {
+    return { label: match[1].trim(), value: match[2].trim() };
+  }
 
-function isPrimaryStatField(field: EncounterField): boolean {
-  const label = normalizedLabel(field.label);
-  return VITAL_LABELS.has(label) || ABILITY_LABELS.has(label);
+  const compactMatch =
+    /^\s*(?:[-+*]\s+)?\*\*([^*]+?)\s+([+-]\d+)\*\*\s*(.*?)\s*$/u.exec(
+      line,
+    );
+  if (!compactMatch) return null;
+  return {
+    label: compactMatch[1].trim(),
+    value: `${compactMatch[2]}${compactMatch[3]}`.trim(),
+  };
 }
 
 function parseFields(line: string): EncounterField[] {
-  const segments = line.split(/\s+[—–-]\s+(?=\*\*)/u);
+  const italicMatch = /^\s*(?:\*([^*]+)\*|_([^_]+)_)\s*$/u.exec(line);
+  if (italicMatch) {
+    const compactVitals = (italicMatch[1] ?? italicMatch[2])
+      .split(/\s+·\s+/u)
+      .map((segment) =>
+        /^\s*(CA|PV|vitesse)\s+(.+?)\s*$/iu.exec(segment),
+      )
+      .filter((match): match is RegExpExecArray => Boolean(match))
+      .map((match) => ({ label: match[1], value: match[2] }));
+    if (compactVitals.length > 0) return compactVitals;
+  }
+
+  const segments = line.split(
+    /(?:\s+[—–·-]\s+|;\s+)(?=\*\*)/u,
+  );
   if (segments.length > 1) {
-    const fields = segments.map(parseField);
-    if (
-      fields.every((field): field is EncounterField => Boolean(field)) &&
-      fields.every(isPrimaryStatField)
-    ) {
-      return fields;
-    }
+    const fields = segments
+      .map(parseField)
+      .filter((field): field is EncounterField => Boolean(field));
+    if (fields.length > 0) return fields;
   }
 
   const field = parseField(line);
   return field ? [field] : [];
+}
+
+function compactSubtitle(line: string): string {
+  const firstSegment = line.split(/\s+·\s+/u)[0];
+  return firstSegment.trim();
+}
+
+function isBodyField(field: EncounterField): boolean {
+  const label = normalizedLabel(field.label);
+  return (
+    /[.]\s*$/u.test(field.label) ||
+    /[—–]/u.test(field.label) ||
+    /^(?:ACTION|REACTION|MANOEUVRE|TACTIQUE|COMPORTEMENT)\b/u.test(label)
+  );
 }
 
 function introMarkdown(markdown: string): string {
@@ -157,16 +188,24 @@ export function isEncounterMarkdown(markdown: string): boolean {
 function findBodyStart(lines: string[]): { introEnd: number; bodyStart: number } {
   let foundEncounterField = false;
   for (let index = 1; index < lines.length; index += 1) {
-    for (const field of parseFields(lines[index])) {
+    const line = lines[index];
+    const fields = parseFields(line);
+    for (const field of fields) {
       const label = normalizedLabel(field.label);
       if (VITAL_LABELS.has(label) || ABILITY_LABELS.has(label)) {
         foundEncounterField = true;
       }
     }
-    if (foundEncounterField && /^\s*---\s*$/u.test(lines[index])) {
+    if (foundEncounterField && /^\s*---\s*$/u.test(line)) {
       return { introEnd: index, bodyStart: index + 1 };
     }
-    if (foundEncounterField && /^#{1,6}\s+/u.test(lines[index])) {
+    if (foundEncounterField && /^#{1,6}\s+/u.test(line)) {
+      return { introEnd: index, bodyStart: index };
+    }
+    if (foundEncounterField && fields.some(isBodyField)) {
+      return { introEnd: index, bodyStart: index };
+    }
+    if (foundEncounterField && line.trim() && fields.length === 0) {
       return { introEnd: index, bodyStart: index };
     }
   }
@@ -175,12 +214,15 @@ function findBodyStart(lines: string[]): { introEnd: number; bodyStart: number }
 
 export function parseEncounterMarkdown(markdown: string): EncounterSheetData {
   const lines = markdown.split(/\r\n|\r|\n/u);
-  const headingMatch = /^(#{1,2})\s+(.+)$/u.exec(lines[0] ?? "");
-  const headingLevel = (headingMatch?.[1].length === 2 ? 2 : 1) as 1 | 2;
+  const headingMatch = /^(#{1,3})\s+(.+)$/u.exec(lines[0] ?? "");
+  const headingLevel = Math.min(headingMatch?.[1].length ?? 1, 3) as 1 | 2 | 3;
   const rawTitle = headingMatch?.[2].trim() || "Encounter";
   const title =
     rawTitle
-      .replace(/\s*[—–-]\s*FP\s*[0-9]+(?:[.,/]\d+)?\s*$/iu, "")
+      .replace(
+        /\s*(?:[—–-]|·)\s*FP\s*[0-9]+(?:[.,/]\d+)?(?:\s*·\s*\d+\s*PX)?\s*$/iu,
+        "",
+      )
       .trim() || rawTitle;
   const { introEnd, bodyStart } = findBodyStart(lines);
   let cursor = 1;
@@ -191,7 +233,7 @@ export function parseEncounterMarkdown(markdown: string): EncounterSheetData {
     lines[cursor] ?? "",
   );
   if (subtitleMatch) {
-    subtitle = (subtitleMatch[1] ?? subtitleMatch[2]).trim();
+    subtitle = compactSubtitle(subtitleMatch[1] ?? subtitleMatch[2]);
     cursor += 1;
   }
 
@@ -199,6 +241,13 @@ export function parseEncounterMarkdown(markdown: string): EncounterSheetData {
   const abilities: EncounterField[] = [];
   const details: EncounterField[] = [];
   const descriptionLines: string[] = [];
+
+  if (subtitleMatch) {
+    for (const field of parseFields(lines[cursor - 1])) {
+      const vitalLabel = VITAL_LABELS.get(normalizedLabel(field.label));
+      if (vitalLabel) vitals.push({ ...field, label: vitalLabel });
+    }
+  }
 
   for (let index = cursor; index < introEnd; index += 1) {
     const line = lines[index];
@@ -242,7 +291,7 @@ export function parseEncounterMarkdown(markdown: string): EncounterSheetData {
 
 export function splitScenarioMarkdown(markdown: string): ScenarioSegment[] {
   if (!markdown.trim()) return [];
-  const headings = [...markdown.matchAll(/^(#{1,2})\s+.+$/gmu)].map(
+  const headings = [...markdown.matchAll(/^(#{1,3})\s+.+$/gmu)].map(
     (match) => ({
       index: match.index ?? 0,
       level: match[1].length,
