@@ -40,12 +40,24 @@ export type MapViewport = {
   y: number;
 };
 
+export type SceneMap = {
+  id: string;
+  name: string;
+  assetId: string;
+  outsideRevealed: boolean;
+  zones: RevealZone[];
+  strokes: RevealStroke[];
+  viewport: MapViewport;
+};
+
 export type Scene = {
   id: string;
   name: string;
   scenarioMarkdown: string;
   scenarioTheme: ScenarioTheme;
   mapAssetId: string | null;
+  maps: SceneMap[];
+  activeMapId: string | null;
   galleryAssetIds: string[];
   activeImageId: string | null;
   imageViewports: Record<string, MapViewport>;
@@ -101,6 +113,8 @@ export function createScene(index = 1): Scene {
     scenarioMarkdown: "",
     scenarioTheme: DEFAULT_SCENARIO_THEME,
     mapAssetId: null,
+    maps: [],
+    activeMapId: null,
     galleryAssetIds: [],
     activeImageId: null,
     imageViewports: {},
@@ -670,9 +684,72 @@ export function collectAssetIds(scenes: Scene[]): string[] {
   const ids = new Set<string>();
   for (const scene of scenes) {
     if (scene.mapAssetId) ids.add(scene.mapAssetId);
+    for (const map of scene.maps ?? []) ids.add(map.assetId);
     for (const assetId of scene.galleryAssetIds) ids.add(assetId);
   }
   return [...ids];
+}
+
+export function normalizeSceneMaps(scene: Scene): Scene {
+  if (Array.isArray(scene.maps) && scene.maps.length) {
+    const activeMap = scene.maps.find((map) => map.id === scene.activeMapId) ?? scene.maps[0];
+    return {
+      ...scene,
+      activeMapId: activeMap.id,
+      mapAssetId: activeMap.assetId,
+      outsideRevealed: activeMap.outsideRevealed,
+      zones: activeMap.zones,
+      strokes: activeMap.strokes,
+      viewport: activeMap.viewport,
+      galleryAssetIds: [...new Set([...(scene.galleryAssetIds ?? []), ...scene.maps.map((map) => map.assetId)])],
+    };
+  }
+  if (!scene.mapAssetId) return { ...scene, maps: [], activeMapId: null };
+  const map: SceneMap = {
+    id: createId("map"),
+    name: "Carte 1",
+    assetId: scene.mapAssetId,
+    outsideRevealed: Boolean(scene.outsideRevealed),
+    zones: scene.zones ?? [],
+    strokes: scene.strokes ?? [],
+    viewport: scene.viewport ?? { zoom: 1, x: 0, y: 0 },
+  };
+  return {
+    ...scene,
+    maps: [map],
+    activeMapId: map.id,
+    galleryAssetIds: [...new Set([...(scene.galleryAssetIds ?? []), map.assetId])],
+  };
+}
+
+export function syncActiveMap(scene: Scene): Scene {
+  if (!scene.activeMapId) return scene;
+  return {
+    ...scene,
+    maps: scene.maps.map((map) => map.id === scene.activeMapId ? {
+      ...map,
+      assetId: scene.mapAssetId ?? map.assetId,
+      outsideRevealed: scene.outsideRevealed,
+      zones: scene.zones,
+      strokes: scene.strokes,
+      viewport: scene.viewport,
+    } : map),
+  };
+}
+
+export function selectSceneMap(scene: Scene, mapId: string): Scene {
+  const saved = syncActiveMap(scene);
+  const map = saved.maps.find((item) => item.id === mapId);
+  if (!map) return saved;
+  return {
+    ...saved,
+    activeMapId: map.id,
+    mapAssetId: map.assetId,
+    outsideRevealed: map.outsideRevealed,
+    zones: map.zones,
+    strokes: map.strokes,
+    viewport: map.viewport,
+  };
 }
 
 export function withTimestamp(scene: Scene): Scene {

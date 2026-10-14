@@ -2,6 +2,7 @@
 
 import {
   type ChangeEvent,
+  type RefObject,
   type PointerEvent as ReactPointerEvent,
   type WheelEvent as ReactWheelEvent,
   useCallback,
@@ -9,8 +10,9 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   CHANNEL_NAME,
@@ -36,6 +38,8 @@ import {
   movePolygonVertex,
   snapPointToZoneBoundaries,
   normalizePoint,
+  selectSceneMap,
+  syncActiveMap,
   snapshotFog,
   withTimestamp,
   type FogSnapshot,
@@ -152,12 +156,14 @@ function FilePickerButton({
   );
 }
 
-function useSceneAssetUrls(scene: Scene | null): Map<string, string> {
+function useSceneAssets(scene: Scene | null): { urls: Map<string, string>; names: Map<string, string> } {
   const [urls, setUrls] = useState<Map<string, string>>(new Map());
+  const [names, setNames] = useState<Map<string, string>>(new Map());
   const assetKey = useMemo(() => {
     if (!scene) return "";
     const ids = new Set<string>();
     if (scene.mapAssetId) ids.add(scene.mapAssetId);
+    for (const map of scene.maps ?? []) ids.add(map.assetId);
     for (const id of scene.galleryAssetIds) ids.add(id);
     return [...ids].sort().join("|");
   }, [scene]);
@@ -168,15 +174,17 @@ function useSceneAssetUrls(scene: Scene | null): Map<string, string> {
     const ids = assetKey ? assetKey.split("|") : [];
     void (async () => {
       const next = new Map<string, string>();
+      const nextNames = new Map<string, string>();
       for (const id of ids) {
         const asset = await getAsset(id);
         if (asset) {
           const url = URL.createObjectURL(asset.blob);
           objectUrls.push(url);
           next.set(id, url);
+          nextNames.set(id, asset.name);
         }
       }
-      if (!cancelled) setUrls(next);
+      if (!cancelled) { setUrls(next); setNames(nextNames); }
     })();
     return () => {
       cancelled = true;
@@ -184,7 +192,7 @@ function useSceneAssetUrls(scene: Scene | null): Map<string, string> {
     };
   }, [assetKey]);
 
-  return urls;
+  return { urls, names };
 }
 
 function mapFitRect(
@@ -283,7 +291,8 @@ function MapStage({
     | { kind: "vertex"; zoneId: string; vertexIndex: number }
     | null
   >(null);
-  const [image, setImage] = useState<HTMLImageElement | null>(null);
+  const [loadedImage, setLoadedImage] = useState<{ url: string; image: HTMLImageElement } | null>(null);
+  const image = loadedImage && loadedImage.url === mapUrl ? loadedImage.image : null;
   const [size, setSize] = useState({ width: 1, height: 1 });
   const [draftRect, setDraftRect] = useState<Point[] | null>(null);
   const [draftStroke, setDraftStroke] = useState<Point[]>([]);
@@ -299,13 +308,12 @@ function MapStage({
   );
 
   useEffect(() => {
-    if (!mapUrl) {
-      setImage(null);
-      return;
-    }
+    if (!mapUrl) return;
+    let cancelled = false;
     const nextImage = new Image();
-    nextImage.onload = () => setImage(nextImage);
+    nextImage.onload = () => { if (!cancelled) setLoadedImage({ url: mapUrl, image: nextImage }); };
     nextImage.src = mapUrl;
+    return () => { cancelled = true; };
   }, [mapUrl]);
 
   useEffect(() => {
@@ -1021,7 +1029,7 @@ function PlayerFrame({
 function PlayerView() {
   const [scene, setScene] = useState<Scene | null>(null);
   const [connected, setConnected] = useState(false);
-  const assetUrls = useSceneAssetUrls(scene);
+  const { urls: assetUrls } = useSceneAssets(scene);
 
   useEffect(() => {
     void (async () => {
@@ -1083,10 +1091,14 @@ function MarkdownContent({
   markdown,
   className = "scenario-markdown",
   headings = [],
+  assetUrls,
+  onShowImage,
 }: {
   markdown: string;
   className?: string;
   headings?: ScenarioOutlineItem[];
+  assetUrls?: Map<string, string>;
+  onShowImage?: (id: string) => void;
 }) {
   let headingIndex = 0;
   const nextHeadingId = () => headings[headingIndex++]?.id;
@@ -1095,7 +1107,25 @@ function MarkdownContent({
     <div className={className}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
+        urlTransform={(url) => url.startsWith("asset:") ? url : defaultUrlTransform(url)}
         components={{
+          img: ({ node, src, alt }) => {
+            void node;
+            const source = typeof src === "string" ? src : "";
+            if (source.startsWith("asset:")) {
+              const id = source.slice(6);
+              const url = assetUrls?.get(id);
+              return url ? (
+                <button type="button" className="scenario-image-link" onClick={() => onShowImage?.(id)} title="Afficher sur l’écran joueurs">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={url} alt={alt ?? "Illustration"} />
+                  <span>Afficher sur l’écran joueurs</span>
+                </button>
+              ) : <span className="scenario-image-missing">Image indisponible : {alt || id}</span>;
+            }
+            // eslint-disable-next-line @next/next/no-img-element
+            return <img src={source} alt={alt ?? ""} />;
+          },
           a: ({ node, ...props }) => {
             void node;
             return (
@@ -1179,9 +1209,13 @@ function MarkdownContent({
 function EncounterSheet({
   sheet,
   headings,
+  assetUrls,
+  onShowImage,
 }: {
   sheet: EncounterSheetData;
   headings: ScenarioOutlineItem[];
+  assetUrls: Map<string, string>;
+  onShowImage: (id: string) => void;
 }) {
   const EncounterTitle =
     sheet.headingLevel === 3 ? "h3" : sheet.headingLevel === 2 ? "h2" : "h1";
@@ -1215,6 +1249,8 @@ function EncounterSheet({
         <MarkdownContent
           markdown={sheet.descriptionMarkdown}
           className="encounter-description scenario-markdown"
+          assetUrls={assetUrls}
+          onShowImage={onShowImage}
         />
       )}
 
@@ -1254,6 +1290,8 @@ function EncounterSheet({
           markdown={sheet.bodyMarkdown}
           className="encounter-body scenario-markdown"
           headings={headings.slice(1)}
+          assetUrls={assetUrls}
+          onShowImage={onShowImage}
         />
       )}
     </article>
@@ -1271,6 +1309,11 @@ function ScenarioWorkspace({
   onOutlineVisibleChange,
   onMarkdownChange,
   onThemeChange,
+  assetUrls,
+  assetNames,
+  onShowImage,
+  onImportImages,
+  scrollPositions,
 }: {
   scene: Scene | null;
   scenes: Scene[];
@@ -1282,6 +1325,11 @@ function ScenarioWorkspace({
   onOutlineVisibleChange: (visible: boolean) => void;
   onMarkdownChange: (markdown: string) => void;
   onThemeChange: (theme: ScenarioTheme) => void;
+  assetUrls: Map<string, string>;
+  assetNames: Map<string, string>;
+  onShowImage: (id: string) => void;
+  onImportImages: (event: ChangeEvent<HTMLInputElement>) => void;
+  scrollPositions: RefObject<Map<string, { editor: number; preview: number; selectionStart: number; selectionEnd: number }>>;
 }) {
   const markdown = scene?.scenarioMarkdown ?? "";
   const theme = scene?.scenarioTheme ?? DEFAULT_SCENARIO_THEME;
@@ -1298,21 +1346,56 @@ function ScenarioWorkspace({
     [markdown],
   );
   const renderedSegments = useMemo(() => {
-    let headingCursor = 0;
-    return scenarioSegments.map((segment) => {
+    return scenarioSegments.reduce<{ cursor: number; items: Array<{ segment: (typeof scenarioSegments)[number]; headings: ScenarioOutlineItem[] }> }>((state, segment) => {
       const headingCount = getScenarioOutline(segment.markdown).length;
       const headings = scenarioOutline.slice(
-        headingCursor,
-        headingCursor + headingCount,
+        state.cursor,
+        state.cursor + headingCount,
       );
-      headingCursor += headingCount;
-      return { segment, headings };
-    });
+      return { cursor: state.cursor + headingCount, items: [...state.items, { segment, headings }] };
+    }, { cursor: 0, items: [] }).items;
   }, [scenarioOutline, scenarioSegments]);
   const encounterCount = scenarioSegments.filter(
     (segment) => segment.kind === "encounter",
   ).length;
   const previewPanelRef = useRef<HTMLElement | null>(null);
+  const editorRef = useRef<HTMLTextAreaElement | null>(null);
+  const activeSceneRef = useRef(activeSceneId);
+  useEffect(() => {
+    activeSceneRef.current = activeSceneId;
+    const position = scrollPositions.current.get(activeSceneId);
+    if (editorRef.current) {
+      editorRef.current.scrollTop = position?.editor ?? 0;
+      editorRef.current.setSelectionRange(position?.selectionStart ?? 0, position?.selectionEnd ?? 0);
+    }
+    if (previewPanelRef.current) previewPanelRef.current.scrollTop = position?.preview ?? 0;
+  }, [activeSceneId, editorVisible, scrollPositions]);
+  const rememberScroll = (part: "editor" | "preview", top: number) => {
+    const id = activeSceneRef.current;
+    const current = scrollPositions.current.get(id) ?? { editor: 0, preview: 0, selectionStart: 0, selectionEnd: 0 };
+    scrollPositions.current.set(id, { ...current, [part]: top });
+  };
+  const rememberSelection = (textarea: HTMLTextAreaElement) => {
+    const id = activeSceneRef.current;
+    const current = scrollPositions.current.get(id) ?? { editor: 0, preview: 0, selectionStart: 0, selectionEnd: 0 };
+    scrollPositions.current.set(id, { ...current, selectionStart: textarea.selectionStart, selectionEnd: textarea.selectionEnd });
+  };
+  const insertImage = (id: string, label: string) => {
+    const textarea = editorRef.current;
+    const insertion = `![${label}](asset:${id})`;
+    const start = textarea?.selectionStart ?? markdown.length;
+    const end = textarea?.selectionEnd ?? markdown.length;
+    const before = markdown.slice(0, start);
+    const after = markdown.slice(end);
+    const prefix = before && !before.endsWith("\n") ? "\n\n" : "";
+    const suffix = after && !after.startsWith("\n") ? "\n\n" : "";
+    onMarkdownChange(`${before}${prefix}${insertion}${suffix}${after}`);
+    window.requestAnimationFrame(() => {
+      textarea?.focus();
+      textarea?.setSelectionRange(start + prefix.length + insertion.length, start + prefix.length + insertion.length);
+      if (textarea) rememberSelection(textarea);
+    });
+  };
   const [activeHeadingId, setActiveHeadingId] = useState(
     scenarioOutline[0]?.id ?? "",
   );
@@ -1455,15 +1538,15 @@ function ScenarioWorkspace({
                 <span className="section-eyebrow">MANUSCRIT</span>
                 <h1>Édition Markdown</h1>
               </div>
-              <span className="scenario-format-hint">
-                # Titre · **gras** · &gt; citation
-              </span>
             </div>
             <textarea
+              ref={editorRef}
               className="scenario-editor"
               aria-label="Texte du scénario en Markdown"
               value={markdown}
               onChange={(event) => onMarkdownChange(event.target.value)}
+              onScroll={(event) => rememberScroll("editor", event.currentTarget.scrollTop)}
+              onSelect={(event) => rememberSelection(event.currentTarget)}
               placeholder={
                 "# La Crypte du roi sans nom\n\n> À lire à voix haute : une brume froide rampe entre les pierres.\n\n## Entrée dans les ruines\n\n- **Objectif :** retrouver le sceau brisé\n- **Danger :** 3 gardiens spectraux\n\n---\n\n### Si les héros fouillent l’autel\n\nIls découvrent une clé d’obsidienne."
               }
@@ -1472,11 +1555,28 @@ function ScenarioWorkspace({
             <footer className="scenario-editor-footer">
               Markdown standard · fiches de rencontre détectées automatiquement
             </footer>
+            <div className="scenario-assets">
+              <div className="scenario-assets-heading"><strong>Images du scénario</strong><span>{scene?.galleryAssetIds.length ?? 0}</span></div>
+              <FilePickerButton className="upload-button" multiple accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp" onChange={onImportImages}>Ajouter des images</FilePickerButton>
+              <div className="scenario-assets-list">
+                {scene?.galleryAssetIds.map((id, index) => (
+                  <button key={id} type="button" onClick={() => insertImage(id, assetNames.get(id)?.replace(/\.[^.]+$/, "") ?? `Image ${index + 1}`)} title="Insérer à la position du curseur">
+                    {assetUrls.get(id) ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={assetUrls.get(id)} alt="" />
+                    ) : <span>…</span>}
+                    <span>{assetNames.get(id) ?? `Image ${index + 1}`}</span><small>Insérer</small>
+                  </button>
+                ))}
+                {!scene?.galleryAssetIds.length && <p>Ajoutez une image, puis insérez-la dans le texte.</p>}
+              </div>
+            </div>
           </section>
         )}
 
         <section
           ref={previewPanelRef}
+          onScroll={(event) => rememberScroll("preview", event.currentTarget.scrollTop)}
           className="scenario-preview-panel"
           id="scenario-preview-panel"
           aria-label="Aperçu du scénario"
@@ -1501,12 +1601,16 @@ function ScenarioWorkspace({
                       key={`encounter-${index}`}
                       sheet={segment.sheet}
                       headings={headings}
+                      assetUrls={assetUrls}
+                      onShowImage={onShowImage}
                     />
                   ) : (
                     <MarkdownContent
                       key={`markdown-${index}`}
                       markdown={segment.markdown}
                       headings={headings}
+                      assetUrls={assetUrls}
+                      onShowImage={onShowImage}
                     />
                   ),
                 )}
@@ -1613,10 +1717,12 @@ function ControllerView() {
   const lastPongRef = useRef(0);
   const saveTimersRef = useRef<Map<string, number>>(new Map());
   const historyRef = useRef<Map<string, FogSnapshot[]>>(new Map());
+  const [undoAvailable, setUndoAvailable] = useState<Record<string, boolean>>({});
+  const scenarioScrollRef = useRef<Map<string, { editor: number; preview: number; selectionStart: number; selectionEnd: number }>>(new Map());
 
   const activeScene =
     scenes.find((scene) => scene.id === activeSceneId) ?? scenes[0] ?? null;
-  const assetUrls = useSceneAssetUrls(activeScene);
+  const { urls: assetUrls, names: assetNames } = useSceneAssets(activeScene);
 
   useEffect(() => {
     scenesRef.current = scenes;
@@ -1717,7 +1823,7 @@ function ControllerView() {
 
   const commitScene = useCallback(
     (scene: Scene, messageType: "STATE_PATCH" | "STATE_SNAPSHOT" = "STATE_PATCH") => {
-      const stamped = withTimestamp(scene);
+      const stamped = withTimestamp(syncActiveMap(scene));
       const nextScenes = scenesRef.current.map((item) =>
         item.id === stamped.id ? stamped : item,
       );
@@ -1757,11 +1863,13 @@ function ControllerView() {
   );
 
   const rememberFog = useCallback((scene: Scene) => {
-    const currentHistory = historyRef.current.get(scene.id) ?? [];
-    historyRef.current.set(scene.id, [
+    const key = scene.activeMapId ?? scene.id;
+    const currentHistory = historyRef.current.get(key) ?? [];
+    historyRef.current.set(key, [
       ...currentHistory.slice(-19),
       snapshotFog(scene),
     ]);
+    setUndoAvailable((current) => ({ ...current, [key]: true }));
   }, []);
 
   const setAppMode = (nextMode: AppMode) => {
@@ -1815,18 +1923,81 @@ function ControllerView() {
     if (!file) return;
     try {
       const asset = await saveImageFile(file);
-      updateActiveScene((scene) => ({
-        ...scene,
+      updateActiveScene((scene) => {
+        const saved = syncActiveMap(scene);
+        const mapId = createId("map");
+        return {
+        ...saved,
+        maps: [...saved.maps, {
+          id: mapId,
+          name: file.name.replace(/\.[^.]+$/, ""),
+          assetId: asset.id,
+          outsideRevealed: false,
+          zones: [],
+          strokes: [],
+          viewport: { zoom: 1, x: 0, y: 0 },
+        }],
+        activeMapId: mapId,
         mapAssetId: asset.id,
+        galleryAssetIds: [...new Set([...scene.galleryAssetIds, asset.id])],
         outsideRevealed: false,
         zones: [],
         strokes: [],
         viewport: { zoom: 1, x: 0, y: 0 },
-      }));
+      }; });
+      setPolygonDraft([]);
+      setEditingZoneId(null);
       setNotice({ tone: "success", text: "Carte enregistrée localement." });
     } catch (error) {
       setNotice({ tone: "error", text: formatError(error) });
     }
+  };
+
+  const addImageAsMap = (assetId: string) => {
+    updateActiveScene((scene) => {
+      const saved = syncActiveMap(scene);
+      const mapId = createId("map");
+      return {
+        ...saved,
+        maps: [...saved.maps, {
+          id: mapId,
+          name: `Carte ${saved.maps.length + 1}`,
+          assetId,
+          outsideRevealed: false,
+          zones: [],
+          strokes: [],
+          viewport: { zoom: 1, x: 0, y: 0 },
+        }],
+        activeMapId: mapId,
+        mapAssetId: assetId,
+        outsideRevealed: false,
+        zones: [],
+        strokes: [],
+        viewport: { zoom: 1, x: 0, y: 0 },
+      };
+    });
+    setPolygonDraft([]);
+    setEditingZoneId(null);
+  };
+
+  const changeMap = (mapId: string) => {
+    updateActiveScene((scene) => selectSceneMap(scene, mapId));
+    setPolygonDraft([]);
+    setEditingZoneId(null);
+  };
+
+  const removeActiveMap = () => {
+    updateActiveScene((scene) => {
+      const saved = syncActiveMap(scene);
+      const maps = saved.maps.filter((map) => map.id !== saved.activeMapId);
+      if (!maps.length) return {
+        ...saved, maps: [], activeMapId: null, mapAssetId: null,
+        outsideRevealed: false, zones: [], strokes: [], viewport: { zoom: 1, x: 0, y: 0 },
+      };
+      return selectSceneMap({ ...saved, maps, activeMapId: null }, maps[0].id);
+    });
+    setPolygonDraft([]);
+    setEditingZoneId(null);
   };
 
   const importGallery = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -1934,10 +2105,12 @@ function ControllerView() {
   const undoFog = () => {
     const current = currentSceneFromRefs();
     if (!current) return;
-    const history = historyRef.current.get(current.id) ?? [];
+    const key = current.activeMapId ?? current.id;
+    const history = historyRef.current.get(key) ?? [];
     const previous = history.at(-1);
     if (!previous) return;
-    historyRef.current.set(current.id, history.slice(0, -1));
+    historyRef.current.set(key, history.slice(0, -1));
+    setUndoAvailable((available) => ({ ...available, [key]: history.length > 1 }));
     commitScene({
       ...current,
       outsideRevealed: previous.outsideRevealed,
@@ -2017,9 +2190,7 @@ function ControllerView() {
     );
   }
 
-  const currentHistory = activeScene
-    ? historyRef.current.get(activeScene.id) ?? []
-    : [];
+  const canUndoFog = activeScene ? Boolean(undoAvailable[activeScene.activeMapId ?? activeScene.id]) : false;
   const effectivePanelWidth = activeScene?.panelVisible
     ? clampPanelWidth(activeScene.panelWidth)
     : PANEL_WIDTH_MIN;
@@ -2100,6 +2271,14 @@ function ControllerView() {
             onThemeChange={(scenarioTheme) =>
               updateActiveScene((scene) => ({ ...scene, scenarioTheme }))
             }
+            assetUrls={assetUrls}
+            assetNames={assetNames}
+            onShowImage={(id) => updateActiveScene((scene) => ({
+              ...scene, activeImageId: id, panelVisible: true,
+              panelWidth: scene.panelWidth > 0 ? scene.panelWidth : DEFAULT_PANEL_WIDTH,
+            }))}
+            onImportImages={(event) => void importGallery(event)}
+            scrollPositions={scenarioScrollRef}
           />
         ) : (
           <>
@@ -2171,16 +2350,29 @@ function ControllerView() {
 
                 <section className="control-section">
                   <div className="section-title-row">
-                    <h3>Carte</h3>
-                    <span>PNG, JPEG ou WebP</span>
+                    <h3>Cartes</h3>
+                    <span>{activeScene?.maps.length ?? 0} carte(s)</span>
+                  </div>
+                  <div className="map-picker-row">
+                    <select aria-label="Carte active" value={activeScene?.activeMapId ?? ""} onChange={(event) => changeMap(event.target.value)}>
+                      {!activeScene?.maps.length && <option value="">Aucune carte</option>}
+                      {activeScene?.maps.map((map) => <option key={map.id} value={map.id}>{map.name}</option>)}
+                    </select>
+                    <button type="button" disabled={!activeScene?.activeMapId} onClick={removeActiveMap} aria-label="Retirer la carte active">Retirer</button>
                   </div>
                   <FilePickerButton
                     className="upload-button"
                     accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
                     onChange={(event) => void importMap(event)}
                   >
-                    {activeScene?.mapAssetId ? "Remplacer la carte" : "Importer une carte"}
+                    Importer une carte
                   </FilePickerButton>
+                  {Boolean(activeScene?.galleryAssetIds.some((id) => !activeScene.maps.some((map) => map.assetId === id))) && (
+                    <select className="map-from-pool" aria-label="Créer une carte avec une image du scénario" value="" onChange={(event) => { if (event.target.value) addImageAsMap(event.target.value); }}>
+                      <option value="">Ou utiliser une image du scénario…</option>
+                      {activeScene?.galleryAssetIds.filter((id) => !activeScene.maps.some((map) => map.assetId === id)).map((id, index) => <option key={id} value={id}>{assetNames.get(id) ?? `Image ${index + 1}`}</option>)}
+                    </select>
+                  )}
                 </section>
 
                 <section className="control-section">
@@ -2332,6 +2524,7 @@ function ControllerView() {
                     }
                     onRemove={(id) =>
                       updateActiveScene((scene) => {
+                        if (scene.maps.some((map) => map.assetId === id) || scene.scenarioMarkdown.includes(`asset:${id}`)) return scene;
                         const imageViewports = { ...scene.imageViewports };
                         delete imageViewports[id];
                         return {
@@ -2371,6 +2564,13 @@ function ControllerView() {
               </>
             ) : (
               <>
+                <section className="control-section">
+                  <div className="section-title-row"><h3>Carte en direct</h3><span>{activeScene?.maps.length ?? 0} carte(s)</span></div>
+                  <select aria-label="Carte affichée aux joueurs" value={activeScene?.activeMapId ?? ""} onChange={(event) => changeMap(event.target.value)}>
+                    {!activeScene?.maps.length && <option value="">Aucune carte</option>}
+                    {activeScene?.maps.map((map) => <option key={map.id} value={map.id}>{map.name}</option>)}
+                  </select>
+                </section>
                 <section className="control-section">
                   <div className="section-title-row">
                     <h3>Brouillard</h3>
@@ -2439,7 +2639,7 @@ function ControllerView() {
                   <div className="button-grid">
                     <button
                       type="button"
-                      disabled={!currentHistory.length}
+                      disabled={!canUndoFog}
                       onClick={undoFog}
                     >
                       Annuler
@@ -2726,7 +2926,7 @@ function GalleryGrid({
                 <span className="image-loading">…</span>
               )}
             </button>
-            {editing && onRemove && (
+            {editing && onRemove && !scene.maps.some((map) => map.assetId === assetId) && !scene.scenarioMarkdown.includes(`asset:${assetId}`) && (
               <button
                 type="button"
                 className="gallery-remove"
@@ -2744,11 +2944,10 @@ function GalleryGrid({
 }
 
 export default function MjScreenApp() {
-  const [isPlayer, setIsPlayer] = useState(false);
-  useEffect(() => {
-    setIsPlayer(
-      new URLSearchParams(window.location.search).get("view") === "player",
-    );
-  }, []);
+  const isPlayer = useSyncExternalStore(
+    () => () => {},
+    () => new URLSearchParams(window.location.search).get("view") === "player",
+    () => false,
+  );
   return isPlayer ? <PlayerView /> : <ControllerView />;
 }

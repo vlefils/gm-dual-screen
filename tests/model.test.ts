@@ -14,6 +14,9 @@ import {
   mergePolygonBoundaries,
   mergePolygonDraftBoundaries,
   movePolygonVertex,
+  normalizeSceneMaps,
+  selectSceneMap,
+  syncActiveMap,
   snapPointToZoneBoundaries,
   snapshotFog,
 } from "../app/lib/model.ts";
@@ -328,4 +331,34 @@ test("les identifiants d’images exportés sont uniques", () => {
     collectAssetIds([first, second]).sort(),
     ["image-1", "image-2", "map-1"],
   );
+});
+
+test("une ancienne scène garde sa carte et son brouillard dans le nouveau modèle", () => {
+  const legacy = createScene();
+  legacy.mapAssetId = "ancienne-carte";
+  legacy.outsideRevealed = true;
+  const migrated = normalizeSceneMaps(legacy);
+  assert.equal(migrated.maps.length, 1);
+  assert.equal(migrated.maps[0].assetId, "ancienne-carte");
+  assert.equal(migrated.maps[0].outsideRevealed, true);
+  assert.ok(migrated.galleryAssetIds.includes("ancienne-carte"));
+});
+
+test("chaque carte retrouve ses zones et son cadrage après un changement", () => {
+  const scene = createScene();
+  scene.maps = [
+    { id: "a", name: "A", assetId: "image-a", outsideRevealed: false, zones: [], strokes: [], viewport: { zoom: 1, x: 0, y: 0 } },
+    { id: "b", name: "B", assetId: "image-b", outsideRevealed: true, zones: [], strokes: [], viewport: { zoom: 2, x: 0.2, y: 0 } },
+  ];
+  scene.activeMapId = "a";
+  scene.mapAssetId = "image-a";
+  scene.viewport = { zoom: 1.5, x: 0.1, y: 0 };
+  scene.zones = [{ id: "zone-a", name: "Entrée", kind: "rect", points: [{ x: 0, y: 0 }, { x: 0.5, y: 0.5 }], revealed: true }];
+  const second = selectSceneMap(scene, "b");
+  assert.equal(second.mapAssetId, "image-b");
+  assert.equal(second.outsideRevealed, true);
+  const first = selectSceneMap(syncActiveMap(second), "a");
+  assert.equal(first.zones[0].id, "zone-a");
+  assert.deepEqual(first.viewport, { zoom: 1.5, x: 0.1, y: 0 });
+  assert.deepEqual(collectAssetIds([first]).sort(), ["image-a", "image-b"]);
 });

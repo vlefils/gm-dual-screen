@@ -3,6 +3,7 @@ import {
   collectAssetIds,
   createId,
   isScenarioTheme,
+  normalizeSceneMaps,
   type AssetRecord,
   type Scene,
 } from "./model.ts";
@@ -88,7 +89,7 @@ export async function getScenes(): Promise<Scene[]> {
   );
   database.close();
   return scenes
-    .map((scene) => ({
+    .map((scene) => normalizeSceneMaps({
       ...scene,
       scenarioMarkdown:
         typeof scene.scenarioMarkdown === "string" ? scene.scenarioMarkdown : "",
@@ -352,7 +353,10 @@ export async function importBackup(
       name,
       scenarioMarkdown:
         typeof original.scenarioMarkdown === "string"
-          ? original.scenarioMarkdown
+          ? original.scenarioMarkdown.replace(/asset:([A-Za-z0-9_-]+)/g, (match, id: string) => {
+              const mapped = assetIdMap.get(id);
+              return mapped ? `asset:${mapped}` : match;
+            })
           : "",
       scenarioTheme: isScenarioTheme(original.scenarioTheme)
         ? original.scenarioTheme
@@ -360,7 +364,13 @@ export async function importBackup(
       mapAssetId: original.mapAssetId
         ? (assetIdMap.get(original.mapAssetId) ?? null)
         : null,
-      galleryAssetIds: original.galleryAssetIds
+      maps: (original.maps ?? []).map((map) => ({
+        ...map,
+        id: createId("map"),
+        assetId: assetIdMap.get(map.assetId) ?? "",
+      })).filter((map) => Boolean(map.assetId)),
+      activeMapId: null,
+      galleryAssetIds: (original.galleryAssetIds ?? [])
         .map((id) => assetIdMap.get(id))
         .filter((id): id is string => Boolean(id)),
       activeImageId: original.activeImageId
@@ -370,8 +380,13 @@ export async function importBackup(
       outsideRevealed: Boolean(original.outsideRevealed),
       updatedAt: new Date().toISOString(),
     };
-    await putScene(scene);
-    importedScenes.push(scene);
+    if (original.activeMapId && original.maps?.length) {
+      const index = original.maps.findIndex((map) => map.id === original.activeMapId);
+      scene.activeMapId = scene.maps[index]?.id ?? scene.maps[0]?.id ?? null;
+    }
+    const normalized = normalizeSceneMaps(scene);
+    await putScene(normalized);
+    importedScenes.push(normalized);
   }
   return importedScenes;
 }
